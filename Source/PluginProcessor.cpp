@@ -366,6 +366,11 @@ MeridianAudioProcessor::MeridianAudioProcessor()
     outputGainParam = apvts.getRawParameterValue (pid::str (pid::outputGain));
 
     ensureTargetProfileProperty();
+
+    assistant.attach (apvts);
+    assistant.loadProfilesFromDirectory (getUserProfileDirectory());
+    assistant.setActiveProfile (getTargetProfile());
+
     startTimerHz (15);
 }
 
@@ -415,6 +420,19 @@ void MeridianAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     spectrumAnalyzer.prepare (currentSampleRate, maxBlockSize);
     meterQueue.clear();
     spectrumQueue.clear();
+
+    {
+        const juce::ScopedLock sl (captureLock);
+        captureSize = std::max (1, (int) std::ceil (kCaptureSeconds * currentSampleRate));
+        captureL.assign ((size_t) captureSize, 0.0f);
+        captureR.assign ((size_t) captureSize, 0.0f);
+        captureWritePos.store (0);
+        captureFilled.store (0);
+        captureRate.store (currentSampleRate);
+    }
+
+    referencePanel.setPlaybackSampleRate (currentSampleRate);
+    assistant.prepare (currentSampleRate, maxBlockSize);
 
     samplePosition = 0;
 
@@ -711,6 +729,10 @@ void MeridianAudioProcessor::processChunk (int numSamples) noexcept
         }
     }
 
+    // The assistant / codec preview analyse the processed programme, so the
+    // capture happens before delta solo or reference A/B replace the output.
+    writeCapture (numSamples);
+
     // Delta solo replaces the output with the monitored difference signal,
     // aligned with the rest of the chain.
     if (deltaSlot >= 0)
@@ -724,6 +746,83 @@ void MeridianAudioProcessor::processChunk (int numSamples) noexcept
     }
 
     pushMeters (numSamples);
+
+    // Reference A/B: replaces the output with the level-matched reference
+    // (after metering, so the meters keep showing the processed mix).
+    referencePanel.renderReference (bufL.data(), bufR.data(), numSamples);
+}
+
+void MeridianAudioProcessor::writeCapture (int numSamples) noexcept
+{
+    if (captureSize <= 0)
+        return;
+
+    int pos = captureWritePos.load (std::memory_order_relaxed);
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        captureL[(size_t) pos] = static_cast<float> (bufL[(size_t) i]);
+        captureR[(size_t) pos] = static_cast<float> (bufR[(size_t) i]);
+        if (++pos >= captureSize)
+            pos = 0;
+    }
+
+    captureWritePos.store (pos, std::memory_order_release);
+    const int filled = captureFilled.load (std::memory_order_relaxed);
+    if (filled < captureSize)
+        captureFilled.store (std::min (captureSize, filled + numSamples), std::memory_order_release);
+}
+
+int MeridianAudioProcessor::copyRecentAudio (juce::AudioBuffer<float>& dest, double seconds) const
+{
+    const juce::ScopedLock sl (captureLock);
+
+    if (captureSize <= 0)
+    {
+        dest.setSize (2, 0);
+        return 0;
+    }
+
+    const int filled = captureFilled.load (std::memory_order_acquire);
+    const int writePos = captureWritePos.load (std::memory_order_acquire);
+    const int wanted = (int) std::floor (std::max (0.0, seconds) * captureRate.load());
+    const int n = std::min (filled, std::min (wanted, captureSize));
+
+    dest.setSize (2, n, false, true, false);
+
+    int start = writePos - n;
+    if (start < 0)
+        start += captureSize;
+
+    const int first = std::min (n, captureSize - start);
+    dest.copyFrom (0, 0, captureL.data() + start, first);
+    dest.copyFrom (1, 0, captureR.data() + start, first);
+
+    if (n > first)
+    {
+        dest.copyFrom (0, first, captureL.data(), n - first);
+        dest.copyFrom (1, first, captureR.data(), n - first);
+    }
+
+    return n;
+}
+
+double MeridianAudioProcessor::getCapturedSeconds() const noexcept
+{
+    const double rate = captureRate.load();
+    return rate > 0.0 ? captureFilled.load (std::memory_order_relaxed) / rate : 0.0;
+}
+
+juce::File MeridianAudioProcessor::getUserProfileDirectory()
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+               .getChildFile ("Meridian Mastering Suite").getChildFile ("Profiles");
+}
+
+juce::File MeridianAudioProcessor::getUserPresetDirectory()
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+               .getChildFile ("Meridian Mastering Suite").getChildFile ("Presets");
 }
 
 void MeridianAudioProcessor::processModuleInSlot (int moduleIndex, int numSamples, bool captureDelta) noexcept
@@ -863,6 +962,12 @@ void MeridianAudioProcessor::pushMeters (int numSamples) noexcept
     }
 
     data.samplePosition = samplePosition;
+
+    assistant.updateGRBudget (data.gainReductionPerModule[(int) ModuleId::TruePeakLimiter],
+                              data.gainReductionPerModule);
+    referencePanel.setMainLUFS (data.integratedLUFS > -70.0f ? data.integratedLUFS : data.shortTermLUFS);
+    referencePanel.setMainCrest (data.PLR);
+
     meterQueue.push (data);   // drops silently if the UI is not draining
 
     while (spectrumAnalyzer.getNextFrame (spectrumScratch))

@@ -24,6 +24,9 @@
 
 #include "analysis/MeteringEngine.h"
 #include "analysis/SpectrumAnalyzer.h"
+#include "analysis/CodecPreview.h"
+#include "analysis/ReferencePanel.h"
+#include "assistant/IntelligentAssistant.h"
 
 #include <array>
 #include <atomic>
@@ -185,6 +188,28 @@ public:
     meridian::LockFreeQueue<MeterData, 512> meterQueue;
     meridian::LockFreeQueue<SpectrumFrame, 8> spectrumQueue;
 
+    // ---- Analysis services (message-thread API; see each class for threading) ----
+    meridian::IntelligentAssistant& getAssistant() noexcept    { return assistant; }
+    meridian::ReferencePanel& getReferencePanel() noexcept     { return referencePanel; }
+    meridian::CodecPreview& getCodecPreview() noexcept         { return codecPreview; }
+
+    /** Seconds of processed output kept in the capture ring. */
+    static constexpr double kCaptureSeconds = 20.0;
+
+    /** Message thread: copies the most recent `seconds` of processed output
+        (post output gain, before delta solo / reference A/B) into dest
+        (resized to 2 x available samples). Returns the number of samples copied
+        (0 before any audio has been processed). */
+    int copyRecentAudio (juce::AudioBuffer<float>& dest, double seconds) const;
+
+    /** Seconds of audio currently available in the capture ring (any thread). */
+    double getCapturedSeconds() const noexcept;
+
+    /** User profile directory: <userDocuments>/Meridian Mastering Suite/Profiles */
+    static juce::File getUserProfileDirectory();
+    /** User preset directory: <userDocuments>/Meridian Mastering Suite/Presets */
+    static juce::File getUserPresetDirectory();
+
 private:
     // ---- Per-module runtime state (indexed by ModuleId) ---------------------
     struct ModuleRuntime
@@ -206,6 +231,7 @@ private:
     void processModuleInSlot (int moduleIndex, int numSamples, bool captureDelta) noexcept;
     void readModuleOrder() noexcept;
     void pushMeters (int numSamples) noexcept;
+    void writeCapture (int numSamples) noexcept;
 
     void timerCallback() override;
 
@@ -222,6 +248,20 @@ private:
 
     meridian::MeteringEngine meteringEngine;
     meridian::SpectrumAnalyzer spectrumAnalyzer;
+
+    meridian::IntelligentAssistant assistant;
+    meridian::ReferencePanel referencePanel;
+    meridian::CodecPreview codecPreview;
+
+    // Capture ring (allocated in prepareToPlay under captureLock; the audio
+    // thread never takes the lock - prepareToPlay never runs concurrently with
+    // processBlock - it only writes samples and publishes atomics).
+    std::vector<float> captureL, captureR;
+    std::atomic<int> captureWritePos { 0 };
+    std::atomic<int> captureFilled { 0 };
+    int captureSize = 0;
+    std::atomic<double> captureRate { 48000.0 };
+    mutable juce::CriticalSection captureLock;
 
     /** Slot -> ModuleId, owned by the audio thread (validated copy of module_order params). */
     int moduleOrder[kNumModules] {};
