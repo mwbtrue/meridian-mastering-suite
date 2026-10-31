@@ -23,3 +23,5 @@ meridian_add_test(lufs_test          lufs_test.cpp "${MERIDIAN_SRC}/analysis/Met
                                      "${MERIDIAN_SRC}/common/TruePeakDetector.cpp" "${MERIDIAN_SRC}/common/Biquad.cpp")
 meridian_add_test(crossover_sum_test crossover_sum_test.cpp "${MERIDIAN_SRC}/common/LinearPhaseCrossover.cpp"
                                      "${MERIDIAN_SRC}/common/LinearPhaseFIR.cpp")
+meridian_add_test(ebu_loudness_test  ebu_loudness_test.cpp "${MERIDIAN_SRC}/analysis/MeteringEngine.cpp"
+                                     "${MERIDIAN_SRC}/common/TruePeakDetector.cpp" "${MERIDIAN_SRC}/common/Biquad.cpp")
