@@ -308,7 +308,7 @@ All cross-thread communication uses LockFreeQueue<T,N> (SPSC ring buffer, power-
 | Saturation (4× OS, tape model) | 2.5 |
 | StereoImager (4 bands, FIR xover) | 0.8 |
 | Clipper (8× OS) | 0.6 |
-| TruePeakLimiter (4× OS, 1.5 ms LA) | 1.0 |
+| TruePeakLimiter (4× OS, 1.5 ms LA) — measured 7.4 % at 44.1 kHz (null_test), dominated by the 16× ±64-tap backstop | 7.4 |
 | Dither | 0.05 |
 | Metering + FFT | 0.5 |
 | **Total (default chain)** | **~8%** |
