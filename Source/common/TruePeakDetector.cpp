@@ -1,4 +1,5 @@
 #include "TruePeakDetector.h"
+#include "DotProduct.h"
 
 #include <algorithm>
 #include <cmath>
@@ -77,7 +78,24 @@ void TruePeakDetector::prepare (int maxFactorToUse, int halfSpanSamples, double 
             for (int i = 0; i < length; ++i)
                 c[i] /= sum;
         }
+
+        const int pairs = t.factor / 2;
+        t.even.assign ((size_t) ((pairs + 1) * halfSpan), 0.0);
+        t.odd.assign ((size_t) ((pairs + 1) * halfSpan), 0.0);
+
+        for (int p = 1; p <= pairs; ++p)
+        {
+            const double* c = t.coeffs.data() + (size_t) (p * length);
+            for (int i = 0; i < halfSpan; ++i)
+            {
+                t.even[(size_t) (p * halfSpan + i)] = c[i] + c[length - 1 - i];
+                t.odd[(size_t) (p * halfSpan + i)]  = c[i] - c[length - 1 - i];
+            }
+        }
     }
+
+    foldSum.assign ((size_t) halfSpan, 0.0);
+    foldDiff.assign ((size_t) halfSpan, 0.0);
 
     for (auto& ch : channels)
         ch.history.assign ((size_t) (2 * length), 0.0);
@@ -115,16 +133,31 @@ double TruePeakDetector::process (int chIndex, double x) noexcept
     const double* window = ch.history.data() + ch.writePos;   // oldest -> newest
     double peak = std::abs (window[halfSpan - 1]);             // phase 0 == centre sample
 
-    const double* c = active->coeffs.data();
-    for (int p = 1; p < active->factor; ++p)
+    const int f = active->factor;
+    if (f < 2)
+        return peak;
+
+    double* a = foldSum.data();
+    double* d = foldDiff.data();
+    for (int i = 0; i < halfSpan; ++i)
     {
-        const double* cp = c + (size_t) (p * length);
-        double acc = 0.0;
+        a[i] = window[i] + window[length - 1 - i];
+        d[i] = window[i] - window[length - 1 - i];
+    }
 
-        for (int i = 0; i < length; ++i)
-            acc += cp[i] * window[i];
+    const int pairs = f / 2;
+    for (int p = 1; p <= pairs; ++p)
+    {
+        const double s = dotProduct (active->even.data() + (size_t) (p * halfSpan), a, halfSpan);
 
-        peak = std::max (peak, std::abs (acc));
+        if (2 * p == f)   // centre phase is self-symmetric: s == 2 * y
+        {
+            peak = std::max (peak, std::abs (0.5 * s));
+            continue;
+        }
+
+        const double df = dotProduct (active->odd.data() + (size_t) (p * halfSpan), d, halfSpan);
+        peak = std::max (peak, std::max (std::abs (0.5 * (s + df)), std::abs (0.5 * (s - df))));
     }
 
     return peak;

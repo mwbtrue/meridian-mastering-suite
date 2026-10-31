@@ -322,6 +322,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MeridianAudioProcessor::crea
     b.addFloat  (str (pid::outputGain), "Output Gain", linRange (-24.0f, 24.0f, 0.01f), 0.0f, "dB", formatDb);
     b.addBool   (str (lowLatencyMode), "Low Latency Mode", false);
     b.addFloat  (str (lufsTarget), "LUFS Target", linRange (-20.0f, -6.0f, 0.1f), -9.0f, "LUFS", formatLufs, false);
+    b.addBool   (str (lmBypass), "Loudness-Matched Bypass", true);
 
     return layout;
 }
@@ -333,7 +334,7 @@ MeridianAudioProcessor::MeridianAudioProcessor()
     : juce::AudioProcessor (BusesProperties()
                                 .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                                 .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "MeridianParameters", createParameterLayout())
+      apvts (*this, &undoManager, "MeridianParameters", createParameterLayout())
 {
     modules[(size_t) ModuleId::Input]             = std::make_unique<InputModule> (apvts);
     modules[(size_t) ModuleId::CorrectiveEQ]      = std::make_unique<CorrectiveEQ> (apvts);
@@ -364,6 +365,7 @@ MeridianAudioProcessor::MeridianAudioProcessor()
     }
 
     outputGainParam = apvts.getRawParameterValue (pid::str (pid::outputGain));
+    lmBypassParam   = apvts.getRawParameterValue (pid::str (pid::lmBypass));
 
     ensureTargetProfileProperty();
 
@@ -407,6 +409,11 @@ void MeridianAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         const bool bypassed = rt.bypass->load() >= 0.5f;
         rt.wet.reset (bypassed ? 0.0 : static_cast<double> (rt.wetDry->load()) * 0.01);
         rt.skipped = false;
+
+        rt.lmGain.prepare (currentSampleRate, 50.0);
+        rt.lmGain.reset (1.0);
+        rt.lmInMs = rt.lmOutMs = rt.lmSeconds = 0.0;
+        lmAppliedDb[(size_t) m].store (0.0f);
     }
 
     deltaDelayL.prepare (kMaxChainLatency);
@@ -505,6 +512,43 @@ void MeridianAudioProcessor::timerCallback()
 {
     if (latencyDirty.exchange (false))
         updateLatency();
+
+    // Undo grouping: close the open transaction once edits pause for 400 ms.
+    const int actions = undoManager.getNumActionsInCurrentTransaction();
+    const auto now = juce::Time::getMillisecondCounter();
+
+    if (actions != undoActionsSeen)
+    {
+        undoActionsSeen = actions;
+        undoLastChangeMs = now;
+    }
+    else if (actions > 0 && now - undoLastChangeMs > 400)
+    {
+        undoManager.beginNewTransaction();
+        undoActionsSeen = 0;
+    }
+}
+
+bool MeridianAudioProcessor::undo()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    undoManager.beginNewTransaction();
+    undoActionsSeen = 0;
+    return undoManager.undo();
+}
+
+bool MeridianAudioProcessor::redo()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    undoManager.beginNewTransaction();
+    undoActionsSeen = 0;
+    return undoManager.redo();
+}
+
+double MeridianAudioProcessor::getLoudnessMatchDb (ModuleId id) const noexcept
+{
+    const int i = static_cast<int> (id);
+    return (i >= 0 && i < kNumModules) ? (double) lmAppliedDb[(size_t) i].load (std::memory_order_relaxed) : 0.0;
 }
 
 //==============================================================================
@@ -866,6 +910,7 @@ void MeridianAudioProcessor::processModuleInSlot (int moduleIndex, int numSample
         }
 
         rt.skipped = true;
+        applyLoudnessMatch (rt, bypassed, false, numSamples);
         return;
     }
 
@@ -949,6 +994,63 @@ void MeridianAudioProcessor::processModuleInSlot (int moduleIndex, int numSample
             deltaR[(size_t) i] = diffR;
         }
     }
+
+    applyLoudnessMatch (rt, bypassed, ! bypassed && ! rt.wet.isSmoothing(), numSamples);
+}
+
+void MeridianAudioProcessor::applyLoudnessMatch (ModuleRuntime& rt, bool bypassed, bool settledActive, int numSamples) noexcept
+{
+    // Called after the module's dry/wet mix: bufL/R hold its output and
+    // dryL/R its latency-aligned input.
+    double* L = bufL.data();
+    double* R = bufR.data();
+
+    if (settledActive)
+    {
+        double inSum = 0.0, outSum = 0.0;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            inSum  += dryL[(size_t) i] * dryL[(size_t) i] + dryR[(size_t) i] * dryR[(size_t) i];
+            outSum += L[i] * L[i] + R[i] * R[i];
+        }
+
+        // One-pole average with a 3 s time constant, updated per chunk.
+        const double dt = numSamples / currentSampleRate;
+        const double c = 1.0 - std::exp (-dt / 3.0);
+        rt.lmInMs  += c * (inSum / numSamples - rt.lmInMs);
+        rt.lmOutMs += c * (outSum / numSamples - rt.lmOutMs);
+        rt.lmSeconds = std::min (rt.lmSeconds + dt, 60.0);
+    }
+
+    double target = 1.0;
+    const bool matchOn = lmBypassParam->load (std::memory_order_relaxed) >= 0.5f;
+
+    // Needs >= 0.5 s of programme above -90 dBFS before a ratio is trusted.
+    if (bypassed && matchOn && rt.lmSeconds >= 0.5 && rt.lmInMs > 1.0e-9 && rt.lmOutMs > 1.0e-18)
+        target = juce::jlimit (0.25118864315095801, 3.9810717055349722, std::sqrt (rt.lmOutMs / rt.lmInMs));   // +/-12 dB
+
+    rt.lmGain.setTargetValue (target);
+
+    if (rt.lmGain.isSmoothing())
+    {
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const double g = rt.lmGain.processSample();
+            L[i] *= g;
+            R[i] *= g;
+        }
+    }
+    else if (const double g = rt.lmGain.getCurrentValue(); g != 1.0)
+    {
+        for (int i = 0; i < numSamples; ++i)
+        {
+            L[i] *= g;
+            R[i] *= g;
+        }
+    }
+
+    const auto idx = (size_t) (&rt - runtime.data());
+    lmAppliedDb[idx].store ((float) (20.0 * std::log10 (rt.lmGain.getCurrentValue())), std::memory_order_relaxed);
 }
 
 void MeridianAudioProcessor::pushMeters (int numSamples) noexcept

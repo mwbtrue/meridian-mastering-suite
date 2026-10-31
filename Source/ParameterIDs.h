@@ -143,6 +143,7 @@ namespace pid
     inline constexpr std::string_view outputGain           = "output_gain";
     inline constexpr std::string_view lowLatencyMode       = "low_latency_mode";
     inline constexpr std::string_view lufsTarget           = "lufs_target";
+    inline constexpr std::string_view lmBypass             = "lm_bypass";
 
     // ---- Non-parameter state properties (stored on the APVTS ValueTree) ------
     inline constexpr std::string_view targetProfileProperty = "target_profile";

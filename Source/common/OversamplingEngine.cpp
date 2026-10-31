@@ -1,4 +1,5 @@
 #include "OversamplingEngine.h"
+#include "DotProduct.h"
 
 #include <algorithm>
 #include <cmath>
@@ -200,13 +201,7 @@ int OversamplingEngine::upsample (const double* in, double* out, int numSamplesI
 
         for (int p = 0; p < factor; ++p)
         {
-            const double* h = poly + p * H;
-            double acc = 0.0;
-
-            for (int k = 0; k < H; ++k)
-                acc += h[k] * x[k];
-
-            y[p] = acc;
+            y[p] = dotProduct (poly + p * H, x, H);
         }
     }
 
@@ -241,13 +236,7 @@ int OversamplingEngine::downsample (const double* in, double* out, int numSample
 
         if (phase == 0)
         {
-            const double* x = hist + pos;
-            double acc = 0.0;
-
-            for (int j = 0; j < L; ++j)
-                acc += h[j] * x[j];
-
-            out[written++] = acc;
+            out[written++] = symmetricDotProduct (h, hist + pos, L);   // linear-phase prototype
         }
 
         if (++phase == factor)

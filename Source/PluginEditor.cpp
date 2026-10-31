@@ -51,6 +51,23 @@ MeridianAudioProcessorEditor::MeridianAudioProcessorEditor (MeridianAudioProcess
     };
     addAndMakeVisible (gearButton);
 
+    undoButton.setTooltip ("Undo parameter change (Ctrl+Z)");
+    undoButton.onClick = [this] { meridianProcessor.undo(); updateSlowState(); };
+    addAndMakeVisible (undoButton);
+
+    redoButton.setTooltip ("Redo (Ctrl+Shift+Z / Ctrl+Y)");
+    redoButton.onClick = [this] { meridianProcessor.redo(); updateSlowState(); };
+    addAndMakeVisible (redoButton);
+
+    lmBypassButton.setClickingTogglesState (true);
+    lmBypassButton.setTooltip ("Loudness-matched bypass: a bypassed module keeps the level it had while active, "
+                               "so A/B compares tone, not loudness");
+    lmBypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        meridianProcessor.getAPVTS(), pid::str (pid::lmBypass), lmBypassButton);
+    addAndMakeVisible (lmBypassButton);
+
+    setWantsKeyboardFocus (true);
+
     addAndMakeVisible (presetBrowser);
     presetBrowser.onPresetLoaded = [this]
     {
@@ -84,6 +101,7 @@ MeridianAudioProcessorEditor::MeridianAudioProcessorEditor (MeridianAudioProcess
 MeridianAudioProcessorEditor::~MeridianAudioProcessorEditor()
 {
     stopTimer();
+    lmBypassAttachment.reset();
     rackViewport.setViewedComponent (nullptr, false);
     setLookAndFeel (nullptr);
 }
@@ -107,6 +125,12 @@ void MeridianAudioProcessorEditor::resized()
     gearButton.setBounds (top.removeFromRight (32));
     top.removeFromRight (8);
     latencyLabel.setBounds (top.removeFromRight (180));
+    top.removeFromRight (8);
+    lmBypassButton.setBounds (top.removeFromRight (40));
+    top.removeFromRight (4);
+    redoButton.setBounds (top.removeFromRight (48));
+    top.removeFromRight (4);
+    undoButton.setBounds (top.removeFromRight (48));
     top.removeFromRight (8);
     presetBrowser.setBounds (top.removeFromLeft (juce::jmin (520, top.getWidth())));
 
@@ -232,6 +256,30 @@ void MeridianAudioProcessorEditor::updateSlowState()
     }
 
     presetBrowser.updateSnapshotButtons();
+
+    undoButton.setEnabled (meridianProcessor.canUndo());
+    redoButton.setEnabled (meridianProcessor.canRedo());
+}
+
+bool MeridianAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
+{
+    const auto mods = key.getModifiers();
+    if (! mods.isCommandDown())
+        return false;
+
+    const int code = key.getKeyCode();
+    const bool isZ = code == 'Z' || code == 'z';
+    const bool isY = code == 'Y' || code == 'y';
+
+    if (isZ && ! mods.isShiftDown())
+        meridianProcessor.undo();
+    else if ((isZ && mods.isShiftDown()) || isY)
+        meridianProcessor.redo();
+    else
+        return false;
+
+    updateSlowState();
+    return true;
 }
 
 void MeridianAudioProcessorEditor::timerCallback()

@@ -51,6 +51,12 @@ private:
     {
         int factor = 1;
         std::vector<double> coeffs;   // factor * length, phase-major, oldest -> newest
+
+        // Mirror symmetry: phase f-p is phase p reversed, so for p = 1..f/2
+        //   y_p + y_(f-p) = sum_(i<halfSpan) even_p[i] * (w[i] + w[L-1-i])
+        //   y_p - y_(f-p) = sum_(i<halfSpan) odd_p[i]  * (w[i] - w[L-1-i])
+        // with even/odd = c_p[i] +/- c_p[L-1-i]: ~half the multiplies.
+        std::vector<double> even, odd;   // (factor / 2 + 1) * halfSpan, indexed by p
     };
 
     static int indexForFactor (int f) noexcept;
@@ -69,6 +75,7 @@ private:
     };
 
     std::array<Channel, kMaxChannels> channels;
+    std::vector<double> foldSum, foldDiff;   // halfSpan scratch (audio thread)
 };
 
 /**

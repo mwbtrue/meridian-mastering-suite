@@ -10,6 +10,7 @@
 #include "ui/PresetBrowser.h"
 #include "ui/AssistantPanel.h"
 
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -19,7 +20,7 @@ class MeridianAudioProcessor;
     Meridian main editor.
 
         +------------------------------------------------------------------+
-        | MERIDIAN   [preset v][Save][A][B][C][D]          latency   [gear]|  48 px
+        | MERIDIAN [preset v][Save][A][B][C][D] [Undo][Redo][LM] latency [gear]| 48 px
         +-------------+------------------------------------+---------------+
         | ModuleRack  | SpectrumDisplay (65 %)             | MeterColumn   |
         | (Viewport,  |------------------------------------|  (180 px)     |
@@ -49,6 +50,9 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
 
+    /** Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z or Ctrl+Y redo. */
+    bool keyPressed (const juce::KeyPress& key) override;
+
 private:
     void timerCallback() override;
     void updateSlowState();
@@ -62,6 +66,9 @@ private:
 
     juce::Label logoLabel, latencyLabel;
     juce::TextButton gearButton;
+    juce::TextButton undoButton { "Undo" }, redoButton { "Redo" };
+    juce::TextButton lmBypassButton { "LM" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> lmBypassAttachment;
     meridian::ui::PresetBrowser presetBrowser;
 
     juce::Viewport rackViewport;

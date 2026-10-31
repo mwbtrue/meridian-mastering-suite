@@ -125,6 +125,20 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     juce::AudioProcessorValueTreeState& getAPVTS() noexcept { return apvts; }
 
+    // ---- Undo / redo (message thread) ----------------------------------------
+    /** Every parameter edit made through the APVTS is recorded. Edits are
+        grouped into one undo step until 400 ms pass without a new change, so
+        a knob drag is a single step. Loading a preset, a snapshot or host
+        state clears the history (APVTS::replaceState). */
+    juce::UndoManager& getUndoManager() noexcept { return undoManager; }
+    bool undo();
+    bool redo();
+    bool canUndo() const { return undoManager.canUndo(); }
+    bool canRedo() const { return undoManager.canRedo(); }
+
+    /** Loudness-matched bypass compensation currently applied to a module (dB). */
+    double getLoudnessMatchDb (ModuleId id) const noexcept;
+
     // ---- Latency ------------------------------------------------------------
     /** Sums the current latency of every module in the chain (thread-safe).
         Bypassed modules are included: their dry path stays delay-compensated so
@@ -218,6 +232,12 @@ private:
         meridian::SmoothParam wet;
         bool skipped = false;      // module was fully dry last chunk (not processed)
 
+        // Loudness-matched bypass: output/input mean-square tracked while the
+        // module is fully engaged (~3 s), frozen while bypassed and applied
+        // to the bypassed signal as a smoothed gain (50 ms, clamped +/-12 dB).
+        double lmInMs = 0.0, lmOutMs = 0.0, lmSeconds = 0.0;
+        meridian::SmoothParam lmGain;
+
         std::atomic<float>* bypass  = nullptr;
         std::atomic<float>* channel = nullptr;
         std::atomic<float>* wetDry  = nullptr;
@@ -229,6 +249,7 @@ private:
 
     void processChunk (int numSamples) noexcept;
     void processModuleInSlot (int moduleIndex, int numSamples, bool captureDelta) noexcept;
+    void applyLoudnessMatch (ModuleRuntime& rt, bool bypassed, bool settledActive, int numSamples) noexcept;
     void readModuleOrder() noexcept;
     void pushMeters (int numSamples) noexcept;
     void writeCapture (int numSamples) noexcept;
@@ -241,6 +262,11 @@ private:
     static bool isValidSlot (int slot) noexcept { return slot >= 0 && slot < kNumSnapshots; }
 
     // ---- State --------------------------------------------------------------
+    // Declared before apvts: the APVTS keeps a pointer to it.
+    juce::UndoManager undoManager { 30000, 30 };
+    int undoActionsSeen = 0;
+    juce::uint32 undoLastChangeMs = 0;
+
     juce::AudioProcessorValueTreeState apvts;
 
     std::array<std::unique_ptr<meridian::ModuleBase>, kNumModules> modules;
@@ -270,6 +296,8 @@ private:
     std::array<std::atomic<float>*, kNumModules> orderParams {};
 
     std::atomic<float>* outputGainParam = nullptr;
+    std::atomic<float>* lmBypassParam = nullptr;
+    std::array<std::atomic<float>, kNumModules> lmAppliedDb {};
     meridian::SmoothParam outputGain;
 
     // Delta solo: the first slot with delta enabled is monitored at the output,
