@@ -71,6 +71,7 @@ private:
     SmoothParam logFreq;   // log(Hz)
     SmoothParam monoGain;  // gain of S below the crossover (1 = off, 0 = mono)
     SmoothParam dynMix;    // 0 = dynamic sub off, 1 = on
+    SmoothParam engage;    // 0 = exact identity (both sections off), 1 = split path
 
     // [0] = Mid, [1] = Side; two cascaded sections each
     Biquad lp[2][2], hp[2][2];

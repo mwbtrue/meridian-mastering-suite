@@ -21,6 +21,7 @@ void LowEndControl::prepareModule (double sampleRate, int /*maxBlockSize*/)
     logFreq.prepare (sampleRate, kFreqGlideMs / 3.0);   // ~100 ms to settle (3 tau)
     monoGain.prepare (sampleRate, 15.0);
     dynMix.prepare (sampleRate, 10.0);
+    engage.prepare (sampleRate, 15.0);
 
     attackCoeff  = 1.0 - std::exp (-1.0 / (kAttackMs * 0.001 * sampleRate));
     releaseCoeff = 1.0 - std::exp (-1.0 / (kReleaseMs * 0.001 * sampleRate));
@@ -31,6 +32,7 @@ void LowEndControl::prepareModule (double sampleRate, int /*maxBlockSize*/)
     logFreq.reset (std::log (std::clamp ((double) load (monoFreqParam), 20.0, 0.45 * sampleRate)));
     monoGain.reset (loadBool (monoEnabledParam) ? 0.0 : 1.0);
     dynMix.reset (loadBool (dynEnabledParam) ? 1.0 : 0.0);
+    engage.reset ((loadBool (monoEnabledParam) || loadBool (dynEnabledParam)) ? 1.0 : 0.0);
 
     appliedFreq = -1.0;
     updateCrossover (std::exp (logFreq.getCurrentValue()));
@@ -55,6 +57,7 @@ void LowEndControl::resetModule() noexcept
     logFreq.reset (logFreq.getTargetValue());
     monoGain.reset (monoGain.getTargetValue());
     dynMix.reset (dynMix.getTargetValue());
+    engage.reset (engage.getTargetValue());
     updateCrossover (std::exp (logFreq.getCurrentValue()));
 }
 
@@ -81,6 +84,7 @@ void LowEndControl::updateParameters() noexcept
     logFreq.setTargetValue (std::log (f));
     monoGain.setTargetValue (loadBool (monoEnabledParam) ? 0.0 : 1.0);
     dynMix.setTargetValue (loadBool (dynEnabledParam) ? 1.0 : 0.0);
+    engage.setTargetValue ((loadBool (monoEnabledParam) || loadBool (dynEnabledParam)) ? 1.0 : 0.0);
 
     thresholdDb = (double) load (dynThresholdParam);
     maxGrDb = std::abs ((double) load (dynMaxGrParam));
@@ -134,8 +138,23 @@ void LowEndControl::processBlock (double* L, double* R, int numSamples) noexcept
         const double mOut = gSub * mLo + mHi;
         const double sOut = monoGain.processSample() * sLo + sHi;
 
-        L[i] = mOut + sOut;
-        R[i] = mOut - sOut;
+        // The LR4 split sums to an allpass, not to the input, so with both
+        // sections off the module passes the input untouched (bit-exact null).
+        // The filters keep running so engaging crossfades without a click.
+        const double e = engage.processSample();
+        const double outL = mOut + sOut;
+        const double outR = mOut - sOut;
+
+        if (e >= 1.0)
+        {
+            L[i] = outL;
+            R[i] = outR;
+        }
+        else if (e > 0.0)
+        {
+            L[i] += e * (outL - L[i]);
+            R[i] += e * (outR - R[i]);
+        }
     }
 
     for (int c = 0; c < 2; ++c)
