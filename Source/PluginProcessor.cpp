@@ -441,10 +441,16 @@ void MeridianAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     pendingLatency.store (total);
     latencyDirty.store (false);
     updateLatency();
+    hasBeenPrepared = true;
 }
 
 void MeridianAudioProcessor::releaseResources()
 {
+    // Hosts (e.g. VST3 terminate) may call this without a prior prepareToPlay;
+    // the DSP state is unallocated then and there is nothing to clear.
+    if (! hasBeenPrepared)
+        return;
+
     for (auto& m : modules)
         m->reset();
 

@@ -257,6 +257,7 @@ private:
     // thread never takes the lock - prepareToPlay never runs concurrently with
     // processBlock - it only writes samples and publishes atomics).
     std::vector<float> captureL, captureR;
+    bool hasBeenPrepared = false;   // set by prepareToPlay; guards releaseResources
     std::atomic<int> captureWritePos { 0 };
     std::atomic<int> captureFilled { 0 };
     int captureSize = 0;

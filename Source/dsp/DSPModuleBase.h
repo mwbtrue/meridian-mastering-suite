@@ -59,10 +59,14 @@ public:
         wetSmoother.reset (wetDry);
 
         prepareModule (currentSampleRate, maxBlock);
+        prepared = true;
     }
 
     void reset() noexcept final
     {
+        if (! prepared)          // nothing allocated yet (reset before prepare)
+            return;
+
         dryDelayL.reset();
         dryDelayR.reset();
         passDelay.reset();
@@ -124,6 +128,8 @@ protected:
     int maxBlock = 512;
 
 private:
+    bool prepared = false;
+
     void processChunkWithRouting (double* L, double* R, int n) noexcept
     {
         const int latency = std::min (getLatencySamples(), kMaxRoutingLatency);
