@@ -41,6 +41,10 @@ meridian_add_plugin_test(chain_null_test chain_null_test.cpp)
 add_test(NAME chain_null_test COMMAND chain_null_test)
 set_tests_properties(chain_null_test PROPERTIES LABELS "integration" TIMEOUT 600)
 
+meridian_add_plugin_test(lm_undo_test lm_undo_test.cpp)
+add_test(NAME lm_undo_test COMMAND lm_undo_test)
+set_tests_properties(lm_undo_test PROPERTIES LABELS "integration" TIMEOUT 300)
+
 meridian_add_plugin_test(cpu_bench cpu_bench.cpp)
 add_test(NAME cpu_bench COMMAND cpu_bench --fail-over=30)
 set_tests_properties(cpu_bench PROPERTIES LABELS "perf" TIMEOUT 600)
