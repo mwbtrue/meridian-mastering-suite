@@ -1,0 +1,15 @@
+build/
+.vs/
+*.user
+*.suo
+CMakeCache.txt
+CMakeFiles/
+*.o
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.vcxproj.user
+.DS_Store
+Thumbs.db
