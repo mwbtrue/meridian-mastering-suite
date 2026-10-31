@@ -222,13 +222,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout MeridianAudioProcessor::crea
         const juce::StringArray trebleFreqs { "8 kHz", "10 kHz", "12 kHz", "14 kHz", "16 kHz" };
 
         b.addChoice (str (teqPultecBassFreq), "Pultec Bass Freq", bassFreqs, 2);
-        b.addFloat  (str (teqPultecBassBoost), "Pultec Bass Boost", linRange (0.0f, 10.0f, 0.01f), 1.5f, "dB", formatDb);
+        b.addFloat  (str (teqPultecBassBoost), "Pultec Bass Boost", linRange (0.0f, 10.0f, 0.01f), 1.0f, "dB", formatDb);
         b.addFloat  (str (teqPultecBassAtten), "Pultec Bass Atten", linRange (0.0f, 10.0f, 0.01f), 0.0f, "dB", formatDb);
         b.addChoice (str (teqPultecAttenFreq), "Pultec Atten Freq", attenFreqs, 1);
         b.addFloat  (str (teqPultecAttenBw), "Pultec Atten Bandwidth", linRange (0.5f, 2.0f, 0.01f), 1.0f, "oct", formatOct);
         b.addFloat  (str (teqPultecMidBoost), "Pultec Mid Boost", linRange (0.0f, 10.0f, 0.01f), 0.75f, "dB", formatDb);
         b.addChoice (str (teqPultecMidFreq), "Pultec Mid Freq", midFreqs, 0);
-        b.addFloat  (str (teqPultecMidBw), "Pultec Mid Bandwidth", linRange (0.5f, 2.0f, 0.01f), 1.4f, "oct", formatOct);
+        b.addFloat  (str (teqPultecMidBw), "Pultec Mid Bandwidth", linRange (0.5f, 2.0f, 0.01f), 1.92f, "oct", formatOct);
         b.addFloat  (str (teqPultecTrebleBoost), "Pultec Treble Boost", linRange (0.0f, 10.0f, 0.01f), 1.5f, "dB", formatDb);
         b.addChoice (str (teqPultecTrebleFreq), "Pultec Treble Freq", trebleFreqs, 3);
         b.addFloat  (str (teqPultecTrebleBw), "Pultec Treble Bandwidth", linRange (0.5f, 2.0f, 0.01f), 1.0f, "oct", formatOct);
@@ -236,11 +236,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout MeridianAudioProcessor::crea
         b.addFloat  (str (teqBaxandallBassFreq), "Baxandall Bass Freq", logRange (50.0f, 500.0f, 0.1f), 100.0f, "Hz", formatHz);
         b.addFloat  (str (teqBaxandallTreble), "Baxandall Treble", linRange (-6.0f, 6.0f, 0.01f), 0.0f, "dB", formatDb);
         b.addFloat  (str (teqBaxandallTrebleFreq), "Baxandall Treble Freq", logRange (2000.0f, 15000.0f, 1.0f), 10000.0f, "Hz", formatHz);
-        b.addFloat  (str (teqPassiveMidGain), "Passive Mid Gain", linRange (-6.0f, 6.0f, 0.01f), 0.0f, "dB", formatDb);
-        b.addFloat  (str (teqPassiveMidFreq), "Passive Mid Freq", logRange (200.0f, 8000.0f, 0.1f), 1000.0f, "Hz", formatHz);
-        b.addFloat  (str (teqPassiveMidQ), "Passive Mid Q", linRange (0.3f, 1.5f, 0.001f), 0.7f, "", formatPlain);
+        b.addFloat  (str (teqPassiveMidGain), "Passive Mid Gain", linRange (-6.0f, 6.0f, 0.01f), 0.5f, "dB", formatDb);
+        b.addFloat  (str (teqPassiveMidFreq), "Passive Mid Freq", logRange (200.0f, 8000.0f, 0.1f), 200.0f, "Hz", formatHz);
+        b.addFloat  (str (teqPassiveMidQ), "Passive Mid Q", linRange (0.3f, 1.5f, 0.001f), 0.5f, "", formatPlain);
         b.addFloat  (str (teqSideAirGain), "Side Air Gain", linRange (-6.0f, 6.0f, 0.01f), 1.0f, "dB", formatDb);
         b.addFloat  (str (teqSideAirFreq), "Side Air Freq", logRange (8000.0f, 20000.0f, 1.0f), 10000.0f, "Hz", formatHz);
+        b.addFloat  (str (teqColour), "Tone EQ Analog Colour", linRange (0.0f, 100.0f, 0.1f), 0.0f, "%", formatPercent);
     }
 
     // ---- Saturation -------------------------------------------------------------
@@ -267,7 +268,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MeridianAudioProcessor::crea
     // ---- StereoImager -----------------------------------------------------------
     {
         constexpr float defWidth[kNumImgBands] { 0.0f, 100.0f, 110.0f, 120.0f };
-        constexpr float defXover[kNumImgXovers] { 120.0f, 1000.0f, 6000.0f };
+        constexpr float defXover[kNumImgXovers] { 120.0f, 1000.0f, 8000.0f };
 
         for (int i = 0; i < kNumImgXovers; ++i)
             b.addFloat (xoverParam (imgXoverPrefix, i), "Imager Crossover " + juce::String (i + 1),
@@ -302,7 +303,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MeridianAudioProcessor::crea
 
     // ---- Dither -----------------------------------------------------------------
     b.addBool   (str (ditherEnabled), "Dither Enabled", true);
-    b.addChoice (str (ditherBits), "Dither Bit Depth", { "16 bit", "24 bit" }, 1);
+    b.addChoice (str (ditherBits), "Dither Bit Depth", { "16 bit", "24 bit", "32 bit float (dither off)" }, 1);
     b.addChoice (str (ditherShape), "Dither Noise Shaping", { "TPDF", "High-Shibata", "E-Weighted" }, 1);
 
     // ---- Global per-module routing ----------------------------------------------

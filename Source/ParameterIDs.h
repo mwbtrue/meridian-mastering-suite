@@ -94,6 +94,7 @@ namespace pid
     inline constexpr std::string_view teqPassiveMidQ        = "teq_passive_mid_q";
     inline constexpr std::string_view teqSideAirGain        = "teq_side_air_gain";
     inline constexpr std::string_view teqSideAirFreq        = "teq_side_air_freq";
+    inline constexpr std::string_view teqColour             = "teq_colour";
 
     // ---- Saturation ---------------------------------------------------------
     inline constexpr std::string_view satModel             = "sat_model";
@@ -211,7 +212,7 @@ namespace choices
 
     inline constexpr std::array<int, 5>    satOversampling    { 1, 2, 4, 8, 16 };
     inline constexpr std::array<int, 3>    limOversampling    { 4, 8, 16 };
-    inline constexpr std::array<int, 2>    ditherBits         { 16, 24 };
+    inline constexpr std::array<int, 3>    ditherBits         { 16, 24, 32 };   // 32 = float target: dither off
 
     enum class ChannelMode : int { Stereo = 0, Mid, Side, Left, Right };
     enum class CeqFilterType : int { Bell = 0, LowShelf, HighShelf, Notch, Tilt, HighPass, LowPass, EllipticHighPass };

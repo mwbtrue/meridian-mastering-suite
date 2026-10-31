@@ -30,6 +30,10 @@ set(MERIDIAN_SOURCE_FILES
     common/Biquad.cpp
     common/LinearPhaseCrossover.h
     common/LinearPhaseCrossover.cpp
+    common/LinkwitzRileyBank.h
+    common/LinkwitzRileyBank.cpp
+    common/TruePeakDetector.h
+    common/TruePeakDetector.cpp
 
     # --- Signal chain modules -------------------------------------------------
     dsp/ModuleBase.h
