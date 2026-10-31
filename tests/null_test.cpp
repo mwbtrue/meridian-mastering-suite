@@ -3,6 +3,8 @@
 #include "TestHarness.h"
 #include "dsp/TruePeakLimiter.h"
 
+#include <chrono>
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI init;
@@ -34,7 +36,9 @@ int main()
     lim.reset();
 
     std::vector<double> L = in, R = in;
+    const auto t0 = std::chrono::steady_clock::now();
     test::runModule (lim, L, R);
+    const double secs = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
 
     const int lat = lim.getLatencySamples();
     double maxDev = 0.0;
@@ -45,5 +49,7 @@ int main()
     const bool pass = devDb < -140.0;
     std::printf ("null_test: latency %d samples, GR %.3g dB, max deviation %.1f dBFS -> %s\n",
                  lat, (double) lim.getGainReductionDb(), devDb, pass ? "PASS" : "FAIL");
+    std::printf ("null_test: limiter cost %.2f %% of one core in real time (%d samples @ %.0f Hz in %.4f s)\n",
+                 100.0 * secs / (n / fs), n, fs, secs);
     return pass ? 0 : 1;
 }

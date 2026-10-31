@@ -261,8 +261,10 @@ Support classes:
 | StereoImager LR FIR crossovers (64-tap) | 32 | 0.67 ms |
 | Saturation oversampling (16×, poly FIR group delay) | 64 | 1.33 ms |
 | Clipper oversampling (8×, poly FIR group delay) | 32 | 0.67 ms |
-| TruePeakLimiter lookahead (default 1.5 ms) | 72 | 1.5 ms |
-| TruePeakLimiter oversampling (4×, group delay) | 16 | 0.33 ms |
+| TruePeakLimiter stage-1 lookahead (fixed 0.5 ms) | 24 | 0.5 ms |
+| TruePeakLimiter stage-2 lookahead (default 1.5 ms) | 72 | 1.5 ms |
+| TruePeakLimiter stage-2 detector kernel (2 × 16, any OS factor) | 32 | 0.67 ms |
+| TruePeakLimiter backstop (16×, 2 × 64-tap kernel) | 128 | 2.67 ms |
 | **Full chain, all linear-phase, default oversampling** | **4288** | **~89 ms** |
 | **Full chain, minimum-phase, default oversampling** | **192** | **~4 ms** |
 
@@ -314,5 +316,27 @@ All cross-thread communication uses LockFreeQueue<T,N> (SPSC ring buffer, power-
 Target: < 15% at 48 kHz/512. Default configuration estimated at ~8%, leaving headroom for linear-phase mode (+2–3%) and 16× saturation (+3%).
 
 ---
+
+## 8. Implementation Notes and Deviations (as built)
+
+| Area | As built | Reason |
+|---|---|---|
+| TruePeakLimiter backstop | Independent 16× TruePeakDetector (±64-tap Kaiser β10) + GuaranteedGainSmoother (ramp 1, plateau = kernel) at ceiling × 0.99, then a per-sample clamp to ±ceiling. Replaces the "hard clip on the upsampled signal" / 4× "rescale block" backstop. | A clip on the upsampled signal is not preserved by downsampling; 4× can under-read by up to 0.69 dB near Nyquist; a ±24-tap kernel was measured 3.3 dB low at 0.96 × Nyquist and let white noise overshoot by 0.8 dB. The ±64 kernel is within 0.044 dB to 0.96 × Nyquist. |
+| TruePeakLimiter latency | 256 samples at 48 kHz (stage 1 24 + stage 2 16 + 72 + 16 + backstop 128); 248 at 44.1 kHz. | Low-latency mode removes both lookaheads; the 160 samples of true-peak kernels remain, because removing them would give up the ceiling guarantee. |
+| TruePeakLimiter channel link | Below 150 Hz the LF share of each channel's reduction (LR4 low-pass envelope) is linked in the dB domain with max(). | Filtering the gain signal itself (LP/HP) can raise gain above the requirement and break the ceiling. |
+| TruePeakLimiter Warm style | tanh softening applies to stage 1 only. | Softening stage-2 reduction would exceed the ceiling by definition. |
+| MeteringEngine channel sum | L = −0.691 + 10·log10(z_L + z_R) (BS.1770-4 sum, G = 1 for L/R). | The 0.5·(z_L + z_R) form reads 3.01 dB low; with the standard sum a −23 dBFS stereo 1 kHz sine reads −23.0 LUFS (EBU Tech 3341 case 1). |
+| MeteringEngine K-weighting | 48 kHz BS.1770-4 coefficients; other rates derived by prewarped bilinear transform of the same shelf + high-pass. | BS.1770 only publishes 48 kHz coefficients. |
+| SpectrumFrame | 2048-point layout (1025 bins, magnitude / mid / side / peak-hold, −120 dB floor). | Matches the 2048-pt FFT spec. |
+| Dither | TPDF (xorshift64) + error-feedback shaping, NTF = 1 − Σ cₖ z⁻ᵏ, error clamped to ±1.5 LSB; bit-depth choice includes 32-bit float (dither off). | Error clamp prevents shaping-loop instability on clipped full-scale material. |
+| Saturation multiband split | Minimum-phase LR4 IIR (LinkwitzRileyBank, zero latency). | Keeps the saturation stage latency-free. |
+| LinearPhaseCrossover | Top band = delayed input − Σ lower bands, so the band sum equals the delayed input to within double rounding (measured error 0). Partitioned FFT convolution runs in float. | Perfect reconstruction by construction; float FFT only affects the band shapes, not the sum. |
+| ToneEQ | Pultec low boost at 60 Hz (nearest real switch position to ~70 Hz); "+0.5 dB @ 200 Hz wide" on the passive mid bell (Q 0.5); mid Q 0.7 expressed as 1.92-octave bandwidth; `teq_colour` added (default 0, skipped at 0). | Fidelity to the hardware switch positions. |
+
+### Verification programs (`tests/`, CTest)
+- `null_test`: pink noise at −6 dBFS through the limiter at a 0 dBTP ceiling, compared with the latency-aligned input (pass < −140 dBFS).
+- `limiter_tp_test`: 7 signals × 4/8/16× at −1 dBTP, measured with an independent ±64-tap Blackman-sinc 16× estimator; each signal is followed by silence so the signal's own end is limited too (pass: TP ≤ ceiling, 0 dB tolerance).
+- `lufs_test`: 1 kHz sine at −23 dBFS for 10 s at 48 / 44.1 / 96 kHz (pass −23.0 ± 0.2 LUFS).
+- `crossover_sum_test`: 1 s white noise, 120 / 1000 / 5000 Hz, band sum vs delayed input (pass < 0.1 dB), plus a per-band energy-share check to prove the split is real.
 
 *End of ARCH.md*
