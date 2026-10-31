@@ -33,6 +33,7 @@ set(MERIDIAN_SOURCE_FILES
 
     # --- Signal chain modules -------------------------------------------------
     dsp/ModuleBase.h
+    dsp/DSPModuleBase.h
     dsp/InputModule.h
     dsp/InputModule.cpp
     dsp/CorrectiveEQ.h
