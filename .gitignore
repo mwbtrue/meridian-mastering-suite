@@ -13,3 +13,4 @@ CMakeFiles/
 *.vcxproj.user
 .DS_Store
 Thumbs.db
+.abacus.donotdelete

@@ -318,7 +318,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MeridianAudioProcessor::crea
 
     // ---- Global -----------------------------------------------------------------
     b.addChoice (str (abSlot), "Snapshot Slot", { "A", "B", "C", "D" }, 0, false);
-    b.addFloat  (str (outputGain), "Output Gain", linRange (-24.0f, 24.0f, 0.01f), 0.0f, "dB", formatDb);
+    b.addFloat  (str (pid::outputGain), "Output Gain", linRange (-24.0f, 24.0f, 0.01f), 0.0f, "dB", formatDb);
     b.addBool   (str (lowLatencyMode), "Low Latency Mode", false);
     b.addFloat  (str (lufsTarget), "LUFS Target", linRange (-20.0f, -6.0f, 0.1f), -9.0f, "LUFS", formatLufs, false);
 

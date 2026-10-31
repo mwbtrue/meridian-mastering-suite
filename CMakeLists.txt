@@ -77,7 +77,6 @@ target_compile_definitions(MeridianMasteringSuite
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0
-        JUCE_DISPLAY_SPLASH_SCREEN=0
         JUCE_REPORT_APP_USAGE=0
         JUCE_STRICT_REFCOUNTEDPOINTER=1
         JUCE_SILENCE_XCODE_15_LINKER_WARNING=1
@@ -108,7 +107,8 @@ target_link_libraries(MeridianMasteringSuite
 # ---------------------------------------------------------------------------
 if(MSVC)
     target_compile_options(MeridianMasteringSuite PRIVATE
-        /W4 /permissive- /Zc:__cplusplus /Zc:preprocessor /MP /fp:precise /bigobj
+        "$<$<COMPILE_LANGUAGE:CXX>:/W4;/permissive-;/Zc:__cplusplus;/Zc:preprocessor>"
+        /MP /fp:precise /bigobj
         /wd4100   # unreferenced formal parameter (JUCE callbacks)
         /wd4127)  # conditional expression is constant
     if(MERIDIAN_ENABLE_AVX2)
@@ -117,14 +117,14 @@ if(MSVC)
     target_compile_definitions(MeridianMasteringSuite PRIVATE _USE_MATH_DEFINES NOMINMAX)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
     target_compile_options(MeridianMasteringSuite PRIVATE
-        -Wall -Wextra -Wshadow-field -Wnon-virtual-dtor -Wno-unused-parameter
+        "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wshadow-field;-Wnon-virtual-dtor;-Wno-unused-parameter>"
         -fno-fast-math)
     if(MERIDIAN_ENABLE_AVX2 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
         target_compile_options(MeridianMasteringSuite PRIVATE -mavx2 -mfma)
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(MeridianMasteringSuite PRIVATE
-        -Wall -Wextra -Wnon-virtual-dtor -Wno-unused-parameter
+        "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wnon-virtual-dtor;-Wno-unused-parameter>"
         -fno-fast-math)
     if(MERIDIAN_ENABLE_AVX2 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
         target_compile_options(MeridianMasteringSuite PRIVATE -mavx2 -mfma)
