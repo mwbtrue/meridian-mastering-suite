@@ -30,16 +30,24 @@ struct MeterData
     std::int64_t samplePosition = 0;     // running sample counter at end of the chunk
 };
 
-/** One magnitude spectrum frame (4096-point FFT, 2048 bins) for the display.
-    Channel 0 = Mid (or L+R), channel 1 = Side. Values in dBFS. */
+/** One magnitude spectrum frame for the display (2048-point FFT, Hann window,
+    75 % overlap, bins 0 .. Nyquist). Values in dBFS (a full-scale sine reads
+    0 dB), floored at -120 dB.
+        magnitude      stereo power average  10 log10((|L|^2 + |R|^2) / 2)
+        magnitudeMid   M = (L + R) / 2
+        magnitudeSide  S = (L - R) / 2
+        peakHold       running max of magnitude, exponential decay (tau = 2 s) */
 struct SpectrumFrame
 {
-    static constexpr int fftOrder = 12;
+    static constexpr int fftOrder = 11;
     static constexpr int fftSize  = 1 << fftOrder;
-    static constexpr int numBins  = fftSize / 2;
-    static constexpr int numChannels = 2;
+    static constexpr int numBins  = fftSize / 2 + 1;
+    static constexpr float kFloorDb = -120.0f;
 
-    float magnitudeDb[numChannels][numBins] {};
+    float magnitude[numBins] {};
+    float magnitudeMid[numBins] {};
+    float magnitudeSide[numBins] {};
+    float peakHold[numBins] {};
     double sampleRate = 48000.0;
     std::int64_t samplePosition = 0;
 };
