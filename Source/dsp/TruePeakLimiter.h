@@ -61,11 +61,16 @@ namespace meridian
       reconstruction kernel, so its true peak is scaled exactly.
 
     Backstop (final mathematical guarantee)
-      A second, independent TruePeakDetector at 16x (longer kernel) measures
-      the stage-2 output; a GuaranteedGainSmoother with ramp 1 and a plateau
-      covering that kernel enforces cb = ceiling * 0.994 (-0.052 dB, which
-      covers the worst-case 16x inter-phase under-read of 0.042 dB at
-      Nyquist). The brief asked for a 4x detector with a block rescale:
+      A second, independent TruePeakDetector at 16x with a +/-64-tap Kaiser
+      (beta 10) kernel measures the stage-2 output; a GuaranteedGainSmoother
+      with ramp 1 and a plateau covering that kernel enforces
+      cb = ceiling * 0.99 (-0.087 dB). The long kernel is required: a
+      +/-24-tap kernel reads 3.3 dB low at 0.96 x Nyquist (measured), so
+      broadband material (white noise, the end of a full-scale sweep)
+      overshot the ceiling by up to 0.8 dB against an independent +/-64-tap
+      16x meter. The +/-64 kernel is within 0.044 dB up to 0.96 x Nyquist;
+      the margin covers that plus the 0.042 dB worst-case 16x inter-phase
+      under-read. The brief asked for a 4x detector with a block rescale:
         - 4x can under-read a true peak by up to 0.69 dB near Nyquist, so
           it cannot back a "never exceed" claim measured with a 16x meter;
         - a rescale after the fact cannot correct a peak whose reconstruction
@@ -91,10 +96,10 @@ namespace meridian
     would by definition let the signal exceed the ceiling.
 
     Latency (exact, reported):
-        stage1 (0.5 ms) + halfSpan (16) + lookahead + halfSpan (16) + 2 * 24 (backstop)
-      = 176 samples at 48 kHz with the 1.5 ms default.
+        stage1 (0.5 ms) + halfSpan (16) + lookahead + halfSpan (16) + 2 * 64 (backstop)
+      = 256 samples at 48 kHz with the 1.5 ms default.
     low_latency_mode: stage-1 and stage-2 lookahead are forced to 0; the
-    remaining 80 samples (1.7 ms at 48 kHz) are the true-peak kernels and
+    remaining 160 samples (3.3 ms at 48 kHz) are the true-peak kernels and
     cannot be removed without giving up the ceiling guarantee.
 
     GR metering: getStage2GainReductionDb() (<= 0 dB, the brief's
@@ -115,11 +120,11 @@ public:
 
     static constexpr int kDetectorHalfSpan = 16;
     static constexpr double kDetectorBeta = 8.0;
-    static constexpr int kBackstopHalfSpan = 24;
-    static constexpr double kBackstopBeta = 9.0;
+    static constexpr int kBackstopHalfSpan = 64;
+    static constexpr double kBackstopBeta = 10.0;
     static constexpr int kBackstopFactor = 16;
     static constexpr double kStage2Margin = 0.99;
-    static constexpr double kBackstopMargin = 0.994;
+    static constexpr double kBackstopMargin = 0.99;
     static constexpr double kStage1ThresholdOffsetDb = 1.5;
     static constexpr double kStage1LookaheadMs = 0.5;
     static constexpr double kMaxLookaheadMs = 5.0;
