@@ -71,7 +71,7 @@ int main()
     }
     std::printf ("  -> split %s\n", splitOk ? "OK" : "WRONG");
 
-    const bool pass = std::abs (levelDevDb) < 0.1 && worstDb < 0.1 && splitOk;
+    const bool pass = std::abs (levelDevDb) < 0.05 && worstDb < 0.05 && splitOk;   // spec: flat within +/-0.05 dB
     std::printf ("crossover_sum_test: latency %d, RMS level deviation %.6f dB, error/signal %.1f dB "
                  "(=> max gain deviation bound %.6f dB), peak error %.3g -> %s\n",
                  lat, levelDevDb, errDb, worstDb, maxErr, pass ? "PASS" : "FAIL");

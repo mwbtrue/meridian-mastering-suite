@@ -81,6 +81,11 @@ int main (int argc, char** argv)
     std::printf ("  average load  %6.2f %% of one core (target < 15 %%)\n", pct);
     std::printf ("  worst block   %6.2f %% of its real-time budget\n", worstPct);
     std::printf ("  latency       %d samples (%.2f ms)\n", p.getLatencySamples(), 1000.0 * p.getLatencySamples() / sr);
+    std::printf ("  per-module latency:");
+    for (int m = 0; m < meridian::kNumModules; ++m)
+        if (const auto* mod = p.getModule (static_cast<meridian::ModuleId> (m)); mod != nullptr && mod->getLatencySamples() != 0)
+            std::printf (" %s %d,", std::string (meridian::kModuleNames[(size_t) m]).c_str(), mod->getLatencySamples());
+    std::printf ("\n");
     std::printf ("RESULT: %s\n", pct < 15.0 ? "PASS" : "OVER TARGET");
 
     if (perModule)

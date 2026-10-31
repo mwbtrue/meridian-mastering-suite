@@ -83,7 +83,7 @@ Support classes:
 - **Justification**: Feed-forward topology matches the SSL G-Bus behaviour (transparent control with predictable pumping). Program-dependent auto-release is the key to the SSL "glue" sound — the compressor relaxes faster on dense passages and holds longer on sparse ones.
 
 ### 3.5 MultibandDynamics (4-band)
-- **Crossovers**: Linear-phase Linkwitz-Riley FIR (64-tap per band, Kaiser window β=6). Fixed latency regardless of crossover frequency. Verified flat sum (±0.05 dB, see tests).
+- **Crossovers**: Linear-phase FIR (2049 taps at ≤ 50 kHz, scaled with sample rate; Kaiser window β=6), using uniformly partitioned FFT convolution (P = 256). Latency is fixed at P + D = 1280 samples at 44.1/48 kHz, whatever the crossover frequency. A 64-tap kernel would have a ~4 kHz transition band and could not separate a 120 Hz crossover. The top band is the delayed input minus the lower bands, so the band sum is flat by construction (measured deviation 0.000000 dB; test threshold ±0.05 dB).
 - **Per band**: Same feed-forward VCA model as GlueCompressor plus upward expansion (gain computer mirrored below threshold). Independent attack/release/ratio/threshold/knee per band.
 - **Band processing**: Applied in the M channel and S channel independently (4×2 = 8 processing paths).
 - **Justification**: Linear-phase crossovers preserve transient integrity — critical for mastering. Downward+upward per-band allows both compression and expansion (e.g., upward expand the Air band for shimmer).
@@ -251,24 +251,23 @@ Support classes:
 
 ## 5. Latency Map
 
-| Configuration | Latency (samples @ 48 kHz) | Latency (ms) |
-|---|---|---|
-| All minimum-phase, no oversampling, no lookahead | 0 | 0 |
-| Low-Latency mode (forced min-phase everywhere) | 0 | 0 |
-| CorrectiveEQ linear-phase (8192-tap FIR) | 4096 | 85.3 ms |
-| CorrectiveEQ natural-phase (4096-tap FIR) | 2048 | 42.7 ms |
-| MultibandDynamics LR FIR crossovers (64-tap) | 32 | 0.67 ms |
-| StereoImager LR FIR crossovers (64-tap) | 32 | 0.67 ms |
-| Saturation oversampling (16×, poly FIR group delay) | 64 | 1.33 ms |
-| Clipper oversampling (8×, poly FIR group delay) | 32 | 0.67 ms |
-| TruePeakLimiter stage-1 lookahead (fixed 0.5 ms) | 24 | 0.5 ms |
-| TruePeakLimiter stage-2 lookahead (default 1.5 ms) | 72 | 1.5 ms |
-| TruePeakLimiter stage-2 detector kernel (2 × 16, any OS factor) | 32 | 0.67 ms |
-| TruePeakLimiter backstop (16×, 2 × 64-tap kernel) | 128 | 2.67 ms |
-| **Full chain, all linear-phase, default oversampling** | **4288** | **~89 ms** |
-| **Full chain, minimum-phase, default oversampling** | **192** | **~4 ms** |
+Measured values at 48 kHz with the default parameters (`cpu_bench` prints them from `ModuleBase::getLatencySamples()`):
 
-Total latency is computed in `PluginProcessor::updateLatency()`, called whenever phase mode or oversampling parameters change, and reported via `setLatencySamples()`.
+| Module (default settings) | Latency (samples @ 48 kHz) | Source |
+|---|---|---|
+| DynamicEQ | 16 | Look-ahead FIR detector half-length (`kFirHalf`) |
+| MultibandDynamics | 1280 | Linear-phase crossover FIR group delay |
+| Saturation | 52 | 4× polyphase oversampler (52 taps per phase), up + down group delay |
+| StereoImager | 1280 | Linear-phase crossover FIR group delay |
+| Clipper | 52 | 8× polyphase oversampler group delay |
+| TruePeakLimiter | 256 | Stage-1 look-ahead 24 + stage-2 kernel 16 + look-ahead 72 + kernel 16 + 16× backstop 128 |
+| Input, CorrectiveEQ (min-phase), LowEndControl, GlueCompressor, ToneEQ, Dither | 0 | Zero-latency IIR / per-sample processing |
+| **Full chain, default** | **2936 (61.2 ms)** | Sum of the above |
+| CorrectiveEQ linear-phase (8192-tap FIR) | +4096 | Optional |
+| CorrectiveEQ natural-phase (4096-tap FIR) | +2048 | Optional |
+| Low-Latency mode | Limiter keeps 160 | Look-aheads removed; the true-peak kernels stay, so the ceiling stays guaranteed |
+
+Total latency is computed in `PluginProcessor::computeChainLatency()` whenever phase mode or oversampling parameters change, and reported via `setLatencySamples()`. Bypassed modules keep their dry path delay-compensated, so toggling bypass never changes the reported latency.
 
 ---
 
@@ -295,25 +294,35 @@ All cross-thread communication uses LockFreeQueue<T,N> (SPSC ring buffer, power-
 
 ---
 
-## 7. CPU Budget Estimate (48 kHz / 512 samples / single core)
+## 7. CPU Budget (measured, 48 kHz / 512 samples / single core)
 
-| Module | Est. CPU (%) |
+Measured with `tests/cpu_bench` (60 s of stereo pink noise, default chain, double precision, Release build with LTO, GCC on a Linux x86-64 VM). Per-module figures use `--per-module`: full chain minus the chain with that module bypassed, best of 5 × 4 s runs. Per-module values carry about ±0.3 % of scheduler noise, which is why one reads slightly negative.
+
+| Module | Measured CPU (% of one core) |
 |---|---|
-| CorrectiveEQ (8 biquads, min-phase) | 0.3 |
-| LowEndControl | 0.2 |
-| DynamicEQ (6 bands) | 0.5 |
-| GlueCompressor | 0.3 |
-| MultibandDynamics (4 bands, FIR xover) | 0.8 |
-| ToneEQ | 0.4 |
-| Saturation (4× OS, tape model) | 2.5 |
-| StereoImager (4 bands, FIR xover) | 0.8 |
-| Clipper (8× OS) | 0.6 |
-| TruePeakLimiter (4× OS, 1.5 ms LA) — measured 7.4 % at 44.1 kHz (null_test), dominated by the 16× ±64-tap backstop | 7.4 |
-| Dither | 0.05 |
-| Metering + FFT | 0.5 |
-| **Total (default chain)** | **~8%** |
+| Input | 0.02 |
+| CorrectiveEQ | 0.21 |
+| LowEndControl | 0.09 |
+| DynamicEQ | 0.61 |
+| GlueCompressor | ≈ 0 (−0.28, noise) |
+| MultibandDynamics | 1.47 |
+| ToneEQ | 0.15 |
+| Saturation (4× OS, tape RK4) | 2.86 |
+| StereoImager | 1.22 |
+| Clipper (8× OS) | 2.16 |
+| TruePeakLimiter (16× backstop) | 2.01 |
+| Dither | 0.20 |
+| **Full default chain incl. metering** | **13.15–13.65 %** (worst single block 21 % of its real-time budget) |
 
-Target: < 15% at 48 kHz/512. Default configuration estimated at ~8%, leaving headroom for linear-phase mode (+2–3%) and 16× saturation (+3%).
+Target: < 15 %. The default chain measured 22.0 % before optimisation. Two changes brought it under target:
+- `common/DotProduct.h`: an SSE2/NEON dot product with 4 accumulators. The build uses `-fno-fast-math`, so the compiler does not vectorise floating-point reductions itself.
+- Folded symmetric FIR evaluation:
+  - The oversampler's decimation filter is a symmetric Kaiser sinc, so it is evaluated with a folded dot product at half the multiplies.
+  - In the `TruePeakDetector`, phase *f − p* is phase *p* mirrored, so each pair of phases shares one folded window (sum/difference against even/odd kernel halves).
+
+The limiter, LUFS, EBU and null tests were re-run after this change, with identical results (worst TP −1.0856 dBTP, null −256.5 dBFS).
+
+The CTest `cpu_bench` entry fails only above 30 %, so CI machines that are slower or shared do not give false failures. Run `./tests/cpu_bench` directly for the 15 % verdict. These figures are from a Linux VM. They have not been measured on Windows or in FL Studio.
 
 ---
 
@@ -343,10 +352,37 @@ Target: < 15% at 48 kHz/512. Default configuration estimated at ~8%, leaving hea
 | releaseResources before prepare | `DSPModuleBase::reset()` and `MeridianAudioProcessor::releaseResources()` are no-ops until `prepareToPlay` has run. | The VST3 wrapper calls `releaseResources` from `terminate()` even if the plugin was never prepared; pluginval's "Open plugin (cold)" test crashed on the unallocated limiter state. |
 | ToneEQ | Pultec low boost at 60 Hz (nearest real switch position to ~70 Hz); "+0.5 dB @ 200 Hz wide" on the passive mid bell (Q 0.5); mid Q 0.7 expressed as 1.92-octave bandwidth; `teq_colour` added (default 0, skipped at 0). | Fidelity to the hardware switch positions. |
 
-### Verification programs (`tests/`, CTest)
-- `null_test`: pink noise at −6 dBFS through the limiter at a 0 dBTP ceiling, compared with the latency-aligned input (pass < −140 dBFS).
-- `limiter_tp_test`: 7 signals × 4/8/16× at −1 dBTP, measured with an independent ±64-tap Blackman-sinc 16× estimator; each signal is followed by silence so the signal's own end is limited too (pass: TP ≤ ceiling, 0 dB tolerance).
+### Loudness-matched bypass
+- Global parameter `lm_bypass` (default on, "LM" button in the top bar).
+- While a module is active and its wet/dry mix is settled, the processor tracks the mean-square of the module's latency-aligned input and its output, each with a 3 s one-pole average updated per processing chunk.
+- When the module is bypassed, the bypassed signal is multiplied by sqrt(out/in), so A/B compares sound, not level. The gain is ramped over 50 ms and limited to ±12 dB.
+- No gain is applied until at least 0.5 s of programme above −90 dBFS has been tracked. A module that has never been active therefore bypasses at unity, which keeps the bypass-all null exact.
+- `getLoudnessMatchDb (ModuleId)` exposes the applied compensation for display.
+
+### Undo / redo
+- A `juce::UndoManager` (30 000 units, at least 30 transactions) is declared before the APVTS and passed to it, so every parameter edit becomes undoable.
+- The processor's 15 Hz timer starts a new transaction once 400 ms pass without a new action, so one knob drag is one undo step.
+- `undo()` and `redo()` close the open transaction first.
+- The editor has Undo/Redo buttons, and these shortcuts: Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z and Ctrl+Y.
+- Loading a preset, a snapshot or host state (`APVTS::replaceState`) clears the history, because a different state's history is meaningless.
+
+### LowEndControl identity path
+When both the mono-maker and the dynamic section are off, the module outputs its input exactly. Its filters keep running, and the processed path crossfades in over 15 ms when either section is engaged. Before this change, the LR4 split-and-sum all-pass phase shift kept a neutral LowEndControl from nulling.
+
+### Verification programs (`tests/`, CTest — 8/8 pass)
+- `null_test`: pink noise at −6 dBFS through the limiter at a 0 dBTP ceiling, compared with the latency-aligned input (pass < −140 dBFS; measured −256.5 dBFS).
+- `limiter_tp_test`: 7 signals × 4/8/16× at −1 dBTP, measured with an independent ±64-tap Blackman-sinc 16× estimator. Each signal is followed by silence so the signal's own end is limited too (pass: TP ≤ ceiling; worst −1.0856 dBTP).
 - `lufs_test`: 1 kHz sine at −23 dBFS for 10 s at 48 / 44.1 / 96 kHz (pass −23.0 ± 0.2 LUFS).
-- `crossover_sum_test`: 1 s white noise, 120 / 1000 / 5000 Hz, band sum vs delayed input (pass < 0.1 dB), plus a per-band energy-share check to prove the split is real.
+- `ebu_loudness_test`: EBU Tech 3341 / 3342 conformance cases, synthesised, at 44.1 and 48 kHz (pass ±0.1 LU / LRA ±1 LU as specified; 32/32 pass).
+- `crossover_sum_test`: 1 s white noise, 120 / 1000 / 5000 Hz, band sum vs delayed input (pass < 0.05 dB), plus a per-band energy-share check to prove the split is real.
+- `chain_null_test`: the complete processor, 6 s stereo pink noise at 48 kHz / 512.
+  - (a) All modules bypassed: −6000 dBFS (bit-exact).
+  - (b) All modules active at neutral: −257.6 dBFS.
+  - (c) Each module alone at neutral: all pass. Pass threshold for every case is < −140 dBFS.
+- `lm_undo_test`:
+  - Loudness match: bypassed level equals the active level, +6.000 dB vs +6.000 dB, with a reported compensation of 6.000 dB. With LM off, the bypass returns to 0.000 dB.
+  - Undo/redo: two-step undo and redo restore exact parameter values.
+- `cpu_bench`: default chain CPU (see §7).
+- pluginval 1.x, strictness 10, in-process, GUI tests on (Linux VST3): SUCCESS. Steinberg's separate `validator` was not run, because pluginval was not given its path.
 
 *End of ARCH.md*

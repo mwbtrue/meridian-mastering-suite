@@ -4,7 +4,7 @@
 
 Meridian Mastering Suite is a single stereo mastering plugin (VST3 / AU / Standalone) written in C++20 on JUCE 8. All audio processing runs in 64-bit double precision, and the audio thread is real-time safe: no allocations, locks or file I/O.
 
-The signal chain has 12 modules. You can reorder them by drag-and-drop in the Module Rack. Every module has bypass, delta-solo, wet/dry and Stereo/Mid/Side/L/R routing.
+The signal chain has 12 modules. You can reorder them by drag-and-drop in the Module Rack. Every module has bypass (optionally loudness-matched), delta-solo, wet/dry and Stereo/Mid/Side/L/R routing. All parameter edits are undoable.
 
 | # | Module | Purpose |
 |---|---|---|
@@ -81,17 +81,36 @@ Copy the `.vst3` bundle to `~/.vst3/`.
 ## 7. Running Tests
 
 ```bash
-cd build && ctest --output-on-failure
+cd build && ctest --output-on-failure        # all 8 tests
+ctest -L unit                                # DSP unit tests only
+./tests/cpu_bench --per-module               # CPU verdict (< 15 %) and per-module cost
 ```
 
-Expected: **4/4 PASS**.
+On Windows with Visual Studio, use `ctest -C Release --output-on-failure`.
+
+Expected result: **8/8 PASS**. Measured on Linux: CPU 13.2–13.7 % of one core at 48 kHz / 512.
 
 | Test | What it checks |
 |---|---|
-| `null_test` | Null residual < −140 dBFS |
-| `limiter_tp_test` | True peak ≤ ceiling at 4× / 8× / 16× |
+| `null_test` | Limiter at a 0 dBTP ceiling on −6 dBFS noise nulls below −140 dBFS |
+| `limiter_tp_test` | True peak ≤ ceiling at 4× / 8× / 16× across 7 stress signals |
 | `lufs_test` | −23 dBFS 1 kHz sine reads −23.0 ± 0.2 LUFS at 44.1 / 48 / 96 kHz |
-| `crossover_sum_test` | Linear-phase band sum vs delayed input < 0.1 dB |
+| `ebu_loudness_test` | EBU Tech 3341 / 3342 cases within ±0.1 LU (LRA ±1 LU) |
+| `crossover_sum_test` | Linear-phase band sum flat within ±0.05 dB |
+| `chain_null_test` | Full chain, all bypassed and all neutral, nulls below −140 dBFS |
+| `lm_undo_test` | Loudness-matched bypass level and undo/redo values |
+| `cpu_bench` | Default chain CPU (CTest fails only above 30 %; run it directly for the 15 % verdict) |
+
+To validate the plugin with [pluginval](https://github.com/Tracktion/pluginval) (passes at strictness 10 on Linux):
+
+```bash
+pluginval --strictness-level 10 --validate-in-process "build/MeridianMasteringSuite_artefacts/Release/VST3/Meridian Mastering Suite.vst3"
+```
+
+## 7a. Workflow Controls
+
+- **Undo / Redo:** use the top-bar buttons, or Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y (Cmd on macOS). A continuous knob drag is one undo step. Loading a preset or snapshot starts a fresh history.
+- **LM (loudness-matched bypass):** on by default. When you bypass a module, its output level is matched to what the module was producing, so you judge tone rather than loudness. Turn LM off to hear the raw level difference.
 
 ## 8. Profiles Directory
 
@@ -144,6 +163,7 @@ A JSON file in that directory overrides a factory profile with the same name, an
 - [ ] Listen on mono (correlation check): vocal stays upfront, sub is tight
 - [ ] Reference A/B: spectrum within 2 dB of reference on the SpectrumDisplay
 - [ ] Null test (bypass all): clean null, no clicks or pops on bypass
+- [ ] A/B each module with LM on: every module earns its place at equal loudness
 - [ ] Final output: 24-bit / 44.1 or 48 kHz WAV, dither enabled (High-Shibata)
 
 ## 10. Architecture
