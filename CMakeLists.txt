@@ -92,8 +92,22 @@ target_include_directories(MeridianMasteringSuite
         ${CMAKE_CURRENT_SOURCE_DIR}/Source/assistant
         ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui)
 
+# Factory target profiles, embedded so the assistant always has them even if
+# the user never copies profiles/ to the documents folder.
+juce_add_binary_data(MeridianProfileData
+    HEADER_NAME MeridianProfileData.h
+    NAMESPACE MeridianProfileData
+    SOURCES
+        profiles/rb_fallin_style.json
+        profiles/streaming_normalized.json
+        profiles/apple_digital_masters.json
+        profiles/neo_soul_dynamic.json
+        profiles/club_loud.json)
+set_target_properties(MeridianProfileData PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_link_libraries(MeridianMasteringSuite
     PRIVATE
+        MeridianProfileData
         juce::juce_audio_utils
         juce::juce_audio_processors
         juce::juce_audio_formats

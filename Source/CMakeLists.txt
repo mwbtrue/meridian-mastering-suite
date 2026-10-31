@@ -80,8 +80,8 @@ set(MERIDIAN_SOURCE_FILES
     assistant/TargetProfile.cpp
 
     # --- User interface -------------------------------------------------------
-    ui/LookAndFeel.h
-    ui/LookAndFeel.cpp
+    ui/UITheme.h
+    ui/UITheme.cpp
     ui/ModuleRack.h
     ui/ModuleRack.cpp
     ui/SpectrumDisplay.h
