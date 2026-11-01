@@ -9,20 +9,25 @@
 
 #include "PluginHarness.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 
 namespace
 {
 /** Processes `seconds` of the stimulus in float blocks; returns % of real time. */
+struct BlockStats { double worst = 0.0, p999 = 0.0, p99 = 0.0; };
+
 double measure (MeridianAudioProcessor& p, const std::vector<double>& L, const std::vector<double>& R,
-                double sr, int block, double seconds, double* worstPct)
+                double sr, int block, double seconds, BlockStats* stats)
 {
     juce::AudioBuffer<float> buf (2, block);
     juce::MidiBuffer midi;
     const int n = std::min ((int) L.size(), (int) (seconds * sr));
-    double busy = 0.0, worst = 0.0;
+    double busy = 0.0;
     int blocks = 0;
+    std::vector<double> times;
+    times.reserve ((size_t) (n / block + 1));
 
     for (int o = 0; o + block <= n; o += block)
     {
@@ -36,12 +41,21 @@ double measure (MeridianAudioProcessor& p, const std::vector<double>& L, const s
         p.processBlock (buf, midi);
         const double dt = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
         busy += dt;
-        worst = std::max (worst, dt);
+        times.push_back (dt);
         ++blocks;
     }
 
-    if (worstPct != nullptr)
-        *worstPct = 100.0 * worst / (block / sr);
+    if (stats != nullptr && ! times.empty())
+    {
+        // Percentiles separate a one-off OS stall (worst only) from DSP work
+        // that is genuinely uneven from block to block (p99 / p99.9 high too).
+        std::sort (times.begin(), times.end());
+        const double budget = block / sr;
+        auto at = [&] (double q) { return 100.0 * times[std::min (times.size() - 1, (size_t) (q * (double) times.size()))] / budget; };
+        stats->worst = 100.0 * times.back() / budget;
+        stats->p999 = at (0.999);
+        stats->p99 = at (0.99);
+    }
     return 100.0 * busy / ((double) blocks * block / sr);
 }
 } // namespace
@@ -76,12 +90,13 @@ int main (int argc, char** argv)
 
     measure (p, srcL, srcR, sr, block, 2.0, nullptr);   // warm-up: FIR designs, caches
 
-    double worstPct = 0.0;
-    const double pct = measure (p, srcL, srcR, sr, block, seconds, &worstPct);
+    BlockStats st;
+    const double pct = measure (p, srcL, srcR, sr, block, seconds, &st);
 
     std::printf ("Meridian CPU benchmark: default chain, 48 kHz / %d, %.0f s\n", block, seconds);
     std::printf ("  average load  %6.2f %% of one core (target < 15 %%)\n", pct);
-    std::printf ("  worst block   %6.2f %% of its real-time budget\n", worstPct);
+    std::printf ("  block time    p99 %.2f %%, p99.9 %.2f %%, worst %.2f %% of the real-time budget\n",
+                 st.p99, st.p999, st.worst);
     std::printf ("  latency       %d samples (%.2f ms)\n", p.getLatencySamples(), 1000.0 * p.getLatencySamples() / sr);
     std::printf ("  per-module latency:");
     for (int m = 0; m < meridian::kNumModules; ++m)

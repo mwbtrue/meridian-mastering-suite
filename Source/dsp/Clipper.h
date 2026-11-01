@@ -36,10 +36,10 @@ namespace meridian
     overshoots at the base rate; the TruePeakLimiter that follows enforces
     the true-peak ceiling.
 
-    clipper_enabled = off: latency-matched pass-through (52-sample delay), so
+    clipper_enabled = off: latency-matched pass-through (63-sample delay), so
     toggling never changes the reported latency.
 
-    Latency: 52 samples (OversamplingEngine round trip at 8x).
+    Latency: 63 samples (OversamplingEngine round trip at 8x).
 */
 class Clipper final : public DSPModuleBase
 {

@@ -257,12 +257,12 @@ Measured values at 48 kHz with the default parameters (`cpu_bench` prints them f
 |---|---|---|
 | DynamicEQ | 16 | Look-ahead FIR detector half-length (`kFirHalf`) |
 | MultibandDynamics | 1280 | Linear-phase crossover FIR group delay |
-| Saturation | 52 | 4× polyphase oversampler (52 taps per phase), up + down group delay |
+| Saturation | 63 | Multi-stage half-band oversampler round trip, padded to 63 for every factor |
 | StereoImager | 1280 | Linear-phase crossover FIR group delay |
-| Clipper | 52 | 8× polyphase oversampler group delay |
+| Clipper | 63 | 8× multi-stage half-band oversampler round trip |
 | TruePeakLimiter | 256 | Stage-1 look-ahead 24 + stage-2 kernel 16 + look-ahead 72 + kernel 16 + 16× backstop 128 |
 | Input, CorrectiveEQ (min-phase), LowEndControl, GlueCompressor, ToneEQ, Dither | 0 | Zero-latency IIR / per-sample processing |
-| **Full chain, default** | **2936 (61.2 ms)** | Sum of the above |
+| **Full chain, default** | **2958 (61.6 ms)** | Sum of the above |
 | CorrectiveEQ linear-phase (8192-tap FIR) | +4096 | Optional |
 | CorrectiveEQ natural-phase (4096-tap FIR) | +2048 | Optional |
 | Low-Latency mode | Limiter keeps 160 | Look-aheads removed; the true-peak kernels stay, so the ceiling stays guaranteed |

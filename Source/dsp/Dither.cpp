@@ -6,6 +6,23 @@
 namespace meridian
 {
 
+namespace
+{
+    // Round to nearest, ties to even: identical to std::nearbyint in the default
+    // rounding mode for |x| < 2^51 (adding 1.5 * 2^52 leaves no fractional bits,
+    // so the FPU's own round-to-nearest-even does the work). Inlines to two
+    // additions; MSVC compiles std::nearbyint to a CRT call that checks the
+    // rounding mode and was 5 % of a core here. Exact under /fp:precise and
+    // -fno-fast-math, which forbid reassociating (x + k) - k.
+    inline double roundToNearestEven (double x) noexcept
+    {
+        constexpr double k = 6755399441055744.0;   // 1.5 * 2^52
+        if (std::abs (x) < 2251799813685248.0)       // 2^51
+            return (x + k) - k;
+        return std::nearbyint (x);
+    }
+}
+
 Dither::Dither (juce::AudioProcessorValueTreeState& state) : DSPModuleBase (state)
 {
     enabledParam = rawParam (pid::ditherEnabled);
@@ -86,7 +103,7 @@ void Dither::processBlock (double* L, double* R, int numSamples) noexcept
             const double v = x[i] - fb * lsb;
             const double d = ch.a.uniform() - ch.b.uniform();
             const double w = v + d * lsb;
-            const double y = std::clamp (std::nearbyint (w * invLsb) * lsb, -1.0, maxOut);
+            const double y = std::clamp (roundToNearestEven (w * invLsb) * lsb, -1.0, maxOut);
 
             if (numTaps > 0)
             {

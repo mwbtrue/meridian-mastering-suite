@@ -36,96 +36,92 @@ namespace
             f *= 2;
         return f;
     }
+
+    // Half-band lengths N = 4K - 1 (K nonzero taps per side), Kaiser beta.
+    constexpr int kStageLength[OversamplingEngine::kMaxStages] = { 107, 27, 19, 19 };
+    constexpr double kStageBeta = 8.36;
 }
 
 //==============================================================================
-int OversamplingEngine::tableIndexForFactor (int f) noexcept
+const std::array<OversamplingEngine::Stage, OversamplingEngine::kMaxStages>& OversamplingEngine::getStages()
 {
-    switch (f)
+    static const std::array<Stage, kMaxStages> stages = []
     {
-        case 2:  return 1;
-        case 4:  return 2;
-        case 8:  return 3;
-        case 16: return 4;
-        default: return 0;
-    }
-}
+        std::array<Stage, kMaxStages> s;
 
-OversamplingEngine::FactorTables OversamplingEngine::buildTables (int f)
-{
-    FactorTables t;
-    t.factor = f;
-
-    if (f <= 1)
-    {
-        t.length = 1;
-        t.phaseLength = 1;
-        t.prototype = { 1.0 };
-        t.polyphase = { 1.0 };
-        return t;
-    }
-
-    const int L = getFilterLength (f);
-    t.length = L;
-    t.phaseLength = tapsPerPhase + 1;
-    t.prototype.resize ((size_t) L);
-
-    // Windowed-sinc low-pass at the original Nyquist, expressed at the high rate.
-    const double beta = 0.1102 * (stopbandAttenuationDb - 8.7);
-    const double cutoff = 0.5 * (passbandEdge + stopbandEdge) / static_cast<double> (f); // cycles/sample
-    const double centre = 0.5 * static_cast<double> (L - 1);
-    const double i0Beta = besselI0 (beta);
-
-    double sum = 0.0;
-
-    for (int n = 0; n < L; ++n)
-    {
-        const double x = static_cast<double> (n) - centre;
-        const double arg = 2.0 * cutoff * x;
-        const double sinc = (x == 0.0) ? 1.0 : std::sin (std::numbers::pi * arg) / (std::numbers::pi * arg);
-        const double r = x / centre;
-        const double w = besselI0 (beta * std::sqrt (std::max (0.0, 1.0 - r * r))) / i0Beta;
-        const double h = 2.0 * cutoff * sinc * w;
-        t.prototype[(size_t) n] = h;
-        sum += h;
-    }
-
-    for (auto& h : t.prototype)
-        h /= sum;
-
-    // Polyphase decomposition for interpolation: phase p, tap k -> h[k*M + p] * M.
-    t.polyphase.assign ((size_t) (f * t.phaseLength), 0.0);
-
-    for (int p = 0; p < f; ++p)
-        for (int k = 0; k < t.phaseLength; ++k)
+        for (int i = 0; i < kMaxStages; ++i)
         {
-            const int idx = k * f + p;
-            if (idx < L)
-                t.polyphase[(size_t) (p * t.phaseLength + k)] = t.prototype[(size_t) idx] * static_cast<double> (f);
+            const int N = kStageLength[i];
+            const int K = (N + 1) / 4;
+            const int c = (N - 1) / 2;
+            const double i0Beta = besselI0 (kStageBeta);
+
+            // a[k] = h[c + 2k - 1], k = 1..K: the nonzero off-centre taps of
+            // h[j] = 0.5 sinc((j - c) / 2) w[j]. Normalised so sum(a) = 1/4,
+            // which gives unity DC gain on both polyphase branches.
+            std::vector<double> a ((size_t) K + 1, 0.0);
+            double sum = 0.0;
+
+            for (int k = 1; k <= K; ++k)
+            {
+                const int j = c + 2 * k - 1;
+                const double x = 0.5 * (double) (j - c);
+                const double sinc = std::sin (std::numbers::pi * x) / (std::numbers::pi * x);
+                const double r = (double) (j - c) / (double) c;
+                const double w = besselI0 (kStageBeta * std::sqrt (std::max (0.0, 1.0 - r * r))) / i0Beta;
+                a[(size_t) k] = 0.5 * sinc * w;
+                sum += a[(size_t) k];
+            }
+
+            for (int k = 1; k <= K; ++k)
+                a[(size_t) k] *= 0.25 / sum;
+
+            auto& st = s[(size_t) i];
+            st.half = K;
+            st.upKernel.assign ((size_t) (2 * K), 0.0);
+            st.downKernel.assign ((size_t) (2 * K), 0.0);
+
+            for (int k = 1; k <= K; ++k)
+            {
+                st.upKernel[(size_t) (K - k)] = st.upKernel[(size_t) (K - 1 + k)] = 2.0 * a[(size_t) k];
+                st.downKernel[(size_t) (K - k)] = st.downKernel[(size_t) (K - 1 + k)] = a[(size_t) k];
+            }
         }
 
-    return t;
-}
-
-const std::array<OversamplingEngine::FactorTables, 5>& OversamplingEngine::getTables()
-{
-    static const std::array<FactorTables, 5> tables = []
-    {
-        std::array<FactorTables, 5> t;
-        t[0] = buildTables (1);
-        t[1] = buildTables (2);
-        t[2] = buildTables (4);
-        t[3] = buildTables (8);
-        t[4] = buildTables (16);
-        return t;
+        return s;
     }();
 
-    return tables;
+    return stages;
 }
 
-const std::vector<double>& OversamplingEngine::getPrototype (int f)
+int OversamplingEngine::numStagesFor (int f) noexcept
 {
-    return getTables()[(size_t) tableIndexForFactor (f)].prototype;
+    int s = 0;
+    while ((1 << s) < f && s < kMaxStages)
+        ++s;
+    return s;
+}
+
+int OversamplingEngine::roundTripHighRate (int f) noexcept
+{
+    // Stage i (0-based) runs at 2^(i+1) x and delays by its centre c_i = (N_i - 1) / 2
+    // samples there, once on the way up and once on the way down. Expressed in
+    // samples at the top rate f: 2 * c_i * f / 2^(i+1) = (N_i - 1) * (f >> (i + 1)).
+    const int S = numStagesFor (f);
+    int total = 0;
+    for (int i = 0; i < S; ++i)
+        total += (kStageLength[i] - 1) * (f >> (i + 1));
+    return total;
+}
+
+int OversamplingEngine::padFor (int f) noexcept
+{
+    return f > 1 ? kRoundTripLatency * f - roundTripHighRate (f) : 0;
+}
+
+int OversamplingEngine::latencyForFactor (int f) noexcept
+{
+    return sanitiseFactor (f, 16) > 1 ? kRoundTripLatency : 0;
 }
 
 //==============================================================================
@@ -133,29 +129,36 @@ OversamplingEngine::OversamplingEngine (int maxChans, int maxFact)
     : numChannels (std::max (1, maxChans)),
       maxFactor (sanitiseFactor (std::max (1, maxFact), 16))
 {
-    const int maxLength = getFilterLength (maxFactor);
-
+    const auto& stages = getStages();
     channels.resize ((size_t) numChannels);
 
     for (auto& c : channels)
-    {
-        c.upHistory.assign ((size_t) (2 * (tapsPerPhase + 1)), 0.0);
-        c.downHistory.assign ((size_t) (2 * maxLength), 0.0);
-    }
+        for (int i = 0; i < kMaxStages; ++i)
+        {
+            const int K = stages[(size_t) i].half;
+            auto& st = c.stages[(size_t) i];
+            st.upHist.assign ((size_t) (4 * K), 0.0);
+            st.evenHist.assign ((size_t) (4 * K), 0.0);
+            st.oddRing.assign ((size_t) K, 0.0);
+        }
 
-    active = &getTables()[0];
     factor = 1;
+    numStages = 0;
+    padSamples = 0;
+    latency = 0;
 }
 
 void OversamplingEngine::setOversamplingFactor (int requested) noexcept
 {
     const int f = sanitiseFactor (requested, maxFactor);
 
-    if (f == factor && active != nullptr)
+    if (f == factor)
         return;
 
     factor = f;
-    active = &getTables()[(size_t) tableIndexForFactor (f)];
+    numStages = numStagesFor (f);
+    padSamples = f > 1 ? padFor (f) : 0;
+    latency = latencyForFactor (f);
     reset();
 }
 
@@ -163,11 +166,16 @@ void OversamplingEngine::reset() noexcept
 {
     for (auto& c : channels)
     {
-        std::fill (c.upHistory.begin(), c.upHistory.end(), 0.0);
-        std::fill (c.downHistory.begin(), c.downHistory.end(), 0.0);
-        c.upPos = 0;
-        c.downPos = 0;
-        c.downPhase = 0;
+        for (auto& st : c.stages)
+        {
+            std::fill (st.upHist.begin(), st.upHist.end(), 0.0);
+            std::fill (st.evenHist.begin(), st.evenHist.end(), 0.0);
+            std::fill (st.oddRing.begin(), st.oddRing.end(), 0.0);
+            st.upPos = st.evenPos = st.oddPos = st.phase = 0;
+        }
+
+        c.pad.fill (0.0);
+        c.padPos = 0;
     }
 }
 
@@ -184,29 +192,59 @@ int OversamplingEngine::upsample (const double* in, double* out, int numSamplesI
     }
 
     auto& c = channels[(size_t) channel];
-    const int H = active->phaseLength;              // history length (mirrored to 2H)
-    const double* poly = active->polyphase.data();
-    double* hist = c.upHistory.data();
-    int pos = c.upPos;
+    const auto& stages = getStages();
+    const int total = numSamplesIn * factor;
 
-    for (int n = 0; n < numSamplesIn; ++n)
+    // Each stage reads m samples from out[total - m, total) and writes 2m samples
+    // to out[total - 2m, total). Output pair i lands at or before input i, so the
+    // forward in-place expansion never overwrites an unread input.
+    std::copy (in, in + numSamplesIn, out + (total - numSamplesIn));
+    int m = numSamplesIn;
+
+    for (int s = 0; s < numStages; ++s)
     {
-        // Newest sample at hist[pos]; hist[pos + k] == x[n - k] for k < H.
-        pos = (pos == 0) ? H - 1 : pos - 1;
-        hist[pos] = in[n];
-        hist[pos + H] = in[n];
+        const auto& stage = stages[(size_t) s];
+        auto& st = c.stages[(size_t) s];
+        const int K = stage.half;
+        const int L = 2 * K;
+        const double* kernel = stage.upKernel.data();
+        double* hist = st.upHist.data();
+        int pos = st.upPos;
 
-        const double* x = hist + pos;
-        double* y = out + n * factor;
+        const double* src = out + (total - m);
+        double* dst = out + (total - 2 * m);
 
-        for (int p = 0; p < factor; ++p)
+        for (int i = 0; i < m; ++i)
         {
-            y[p] = dotProduct (poly + p * H, x, H);
+            const double x = src[i];
+            pos = (pos == 0) ? L - 1 : pos - 1;
+            hist[pos] = x;
+            hist[pos + L] = x;
+
+            const double* w = hist + pos;                 // newest first
+            dst[2 * i]     = symmetricDotProduct (kernel, w, L);
+            dst[2 * i + 1] = w[K - 1];                    // centre branch: x[n - K + 1]
         }
+
+        st.upPos = pos;
+        m *= 2;
     }
 
-    c.upPos = pos;
-    return numSamplesIn * factor;
+    if (padSamples > 0)
+    {
+        // Short high-rate delay that brings the round trip to exactly
+        // kRoundTripLatency base-rate samples for every factor (padSamples < kPadRing).
+        int p = c.padPos;
+        for (int i = 0; i < total; ++i)
+        {
+            c.pad[(size_t) p] = out[i];
+            out[i] = c.pad[(size_t) ((p - padSamples) & (kPadRing - 1))];
+            p = (p + 1) & (kPadRing - 1);
+        }
+        c.padPos = p;
+    }
+
+    return total;
 }
 
 int OversamplingEngine::downsample (const double* in, double* out, int numSamplesIn, int channel) noexcept
@@ -221,30 +259,47 @@ int OversamplingEngine::downsample (const double* in, double* out, int numSample
     }
 
     auto& c = channels[(size_t) channel];
-    const int L = active->length;
-    const double* h = active->prototype.data();
-    double* hist = c.downHistory.data();
-    int pos = c.downPos;
-    int phase = c.downPhase;
+    const auto& stages = getStages();
     int written = 0;
 
     for (int n = 0; n < numSamplesIn; ++n)
     {
-        pos = (pos == 0) ? L - 1 : pos - 1;
-        hist[pos] = in[n];
-        hist[pos + L] = in[n];
+        double v = in[n];
+        bool emitted = true;
 
-        if (phase == 0)
+        // Highest-rate stage first. A half-band decimator emits one sample for
+        // every even input: y = sum a (even taps, folded) + 0.5 * odd[n - K].
+        for (int s = numStages - 1; s >= 0; --s)
         {
-            out[written++] = symmetricDotProduct (h, hist + pos, L);   // linear-phase prototype
+            const auto& stage = stages[(size_t) s];
+            auto& st = c.stages[(size_t) s];
+            const int K = stage.half;
+
+            if (st.phase == 0)
+            {
+                const int L = 2 * K;
+                st.evenPos = (st.evenPos == 0) ? L - 1 : st.evenPos - 1;
+                st.evenHist[(size_t) st.evenPos] = v;
+                st.evenHist[(size_t) (st.evenPos + L)] = v;
+
+                v = symmetricDotProduct (stage.downKernel.data(), st.evenHist.data() + st.evenPos, L)
+                    + 0.5 * st.oddRing[(size_t) st.oddPos];   // oldest of the last K odd samples
+                st.phase = 1;
+            }
+            else
+            {
+                st.oddRing[(size_t) st.oddPos] = v;
+                st.oddPos = (st.oddPos + 1 == K) ? 0 : st.oddPos + 1;
+                st.phase = 0;
+                emitted = false;
+                break;
+            }
         }
 
-        if (++phase == factor)
-            phase = 0;
+        if (emitted)
+            out[written++] = v;
     }
 
-    c.downPos = pos;
-    c.downPhase = phase;
     return written;
 }
 

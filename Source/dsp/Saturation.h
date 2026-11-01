@@ -70,7 +70,7 @@ namespace meridian
     100 ms) before the mix, so the blend itself is level-matched. Disabled
     (unity) when mix = 0 or drive = 0.
 
-    Latency: 52 samples for any factor > 1, 0 at 1x (OversamplingEngine).
+    Latency: 63 samples for any factor > 1, 0 at 1x (OversamplingEngine).
 */
 class Saturation final : public DSPModuleBase
 {

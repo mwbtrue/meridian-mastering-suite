@@ -54,7 +54,7 @@ void Saturation::prepareModule (double sampleRate, int maxBlockSize)
             ch.assign ((size_t) maxBlockSize, 0.0);
 
     for (auto& d : dryDelay)
-        d.prepare (OversamplingEngine::tapsPerPhase + 8);
+        d.prepare (OversamplingEngine::kMaxLatencySamples + 8);
 
     splitter.prepare (sampleRate);
     mix.prepare (sampleRate, 20.0);

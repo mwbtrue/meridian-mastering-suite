@@ -26,7 +26,7 @@ void Clipper::prepareModule (double sampleRate, int maxBlockSize)
     engine.reset();
 
     for (auto& d : bypassDelay)
-        d.prepare (OversamplingEngine::tapsPerPhase + 8);
+        d.prepare (OversamplingEngine::kMaxLatencySamples + 8);
 
     ceiling.prepare (sampleRate * kFactor, 20.0);
     drive.prepare (sampleRate * kFactor, 20.0);
