@@ -18,8 +18,11 @@ Verified on Linux after the fix:
 - cpu_bench: 9.85 % default build, 8.71 % AVX2 build (was 13.65 %).
 - pluginval strictness 10 (in-process, GUI on) re-run after the spectrum threading change: SUCCESS.
 
+Windows results from the user (after the CPU fix, `git pull` + rebuild):
+- ctest 10/10 PASS (cpu_bench ctest wall time 11.40 s vs 6.4 s on Linux; the ctest entry only fails above 30 %).
+
 Not verified yet:
-1. Windows cpu_bench after the fix (user to run `git pull`, rebuild, `ctest -C Release`, `build\tests\Release\cpu_bench.exe --per-module`).
+1. Windows cpu_bench verdict after the fix (direct run needed for the 15 % figure) (user to run `git pull`, rebuild, `ctest -C Release`, `build\tests\Release\cpu_bench.exe --per-module`).
 2. Windows VST3 inside FL Studio 21.
 3. macOS AU build and auval.
 
