@@ -19,6 +19,8 @@ Verified on Linux after this fix:
 - pluginval strictness 10: SUCCESS.
 - Per-module (%): Saturation 2.10 (was 2.86), Clipper 1.95 (was 2.64), Dither 0.23 (was 0.79).
 
+Windows build after a50a065 (user log, 2026-11-01): Release build succeeded with no errors. Five C4458 shadowing warnings (GlueCompressor dryL/dryR, PresetBrowser entries) were fixed in the next commit. The "CMAKE_GENERATOR_PLATFORM will be ignored" warnings come from an environment variable on the user's PC and are harmless. ctest and cpu_bench output was not in the log.
+
 Not verified yet:
 1. Windows cpu_bench after this fix. The user needs to run `git pull`, rebuild, `ctest -C Release`, then `build\tests\Release\cpu_bench.exe --per-module`. Also try the build with `-DMERIDIAN_ENABLE_AVX2=ON`.
 2. (done) pluginval strictness 10 after the oversampler change: SUCCESS on Linux at a50a065.

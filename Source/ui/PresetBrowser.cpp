@@ -113,9 +113,9 @@ public:
         addAndMakeVisible (folderButton);
 
         // Pre-select the current preset.
-        const auto& entries = browser.getEntries();
-        for (int i = 0; i < (int) entries.size(); ++i)
-            if (! entries[(size_t) i].isHeader && entries[(size_t) i].name == browser.getCurrentPresetName())
+        const auto& presetEntries = browser.getEntries();
+        for (int i = 0; i < (int) presetEntries.size(); ++i)
+            if (! presetEntries[(size_t) i].isHeader && presetEntries[(size_t) i].name == browser.getCurrentPresetName())
                 list.selectRow (i);
 
         updateButtons();
@@ -144,11 +144,11 @@ private:
 
     void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override
     {
-        const auto& entries = browser.getEntries();
-        if (row < 0 || row >= (int) entries.size())
+        const auto& presetEntries = browser.getEntries();
+        if (row < 0 || row >= (int) presetEntries.size())
             return;
 
-        const auto& e = entries[(size_t) row];
+        const auto& e = presetEntries[(size_t) row];
         if (e.isHeader)
         {
             g.setColour (Colours::textSecondary);
@@ -184,10 +184,10 @@ private:
     const Entry* selectedEntry() const
     {
         const int row = list.getSelectedRow();
-        const auto& entries = browser.getEntries();
-        if (row < 0 || row >= (int) entries.size() || entries[(size_t) row].isHeader)
+        const auto& presetEntries = browser.getEntries();
+        if (row < 0 || row >= (int) presetEntries.size() || presetEntries[(size_t) row].isHeader)
             return nullptr;
-        return &entries[(size_t) row];
+        return &presetEntries[(size_t) row];
     }
 
     void updateButtons()

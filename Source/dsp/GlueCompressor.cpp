@@ -228,15 +228,15 @@ void GlueCompressor::processBlock (double* L, double* R, int numSamples) noexcep
         const double gainDb = core.processPower (power);
         maxGr = std::max (maxGr, core.getGainReductionDb());
 
-        const double dryL = delay[0].processSample (inL, lookaheadSamples);
-        const double dryR = delay[1].processSample (inR, lookaheadSamples);
+        const double delayedL = delay[0].processSample (inL, lookaheadSamples);
+        const double delayedR = delay[1].processSample (inR, lookaheadSamples);
 
         const double wetGain = fastmath::dbToAmp (gainDb) * makeupGain.processSample();
         const double m = mix.processSample();
         const double g = (1.0 - m) + m * wetGain;
 
-        L[i] = dryL * g;
-        R[i] = dryR * g;
+        L[i] = delayedL * g;
+        R[i] = delayedR * g;
     }
 
     scFilter[0].snapToZero();
