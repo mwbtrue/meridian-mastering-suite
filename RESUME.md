@@ -7,8 +7,10 @@ Verified this checkpoint:
 - cpu_bench default chain 48 kHz / 512: 13.15–13.65 % of one core (target < 15 %).
 - pluginval strictness 10, in-process, GUI tests on (DISPLAY=:1): SUCCESS. Steinberg validator not run (path not set).
 
-Not verified (needs hardware or tools this Linux VM does not have):
-1. MSVC / Visual Studio 2022 build and the Windows VST3 inside FL Studio 21.
+Windows (user's machine, 2026-10-31): VS2022 configure + Release build completed; Standalone .exe and all test .exe files linked.
+
+Not verified yet:
+1. Windows ctest results, Windows VST3 inside FL Studio 21.
 2. macOS AU build and auval.
 3. CPU on Windows / in a DAW.
 
