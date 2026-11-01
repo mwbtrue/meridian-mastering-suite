@@ -16,11 +16,12 @@ Second CPU fix (this checkpoint):
 Verified on Linux after this fix:
 - ctest 11/11 PASS.
 - cpu_bench: 9.44 % average (was 9.85 %). Block time p99 12.4 %, worst 14.7 %. Full-chain latency is 2958 samples.
+- pluginval strictness 10: SUCCESS.
 - Per-module (%): Saturation 2.10 (was 2.86), Clipper 1.95 (was 2.64), Dither 0.23 (was 0.79).
 
 Not verified yet:
 1. Windows cpu_bench after this fix. The user needs to run `git pull`, rebuild, `ctest -C Release`, then `build\tests\Release\cpu_bench.exe --per-module`. Also try the build with `-DMERIDIAN_ENABLE_AVX2=ON`.
-2. pluginval strictness 10 after the oversampler change. Last SUCCESS was at commit aaca894. Re-run it with the command in the notes.
+2. (done) pluginval strictness 10 after the oversampler change: SUCCESS on Linux at a50a065.
 3. Windows VST3 inside FL Studio 21.
 4. macOS AU build and auval.
 
