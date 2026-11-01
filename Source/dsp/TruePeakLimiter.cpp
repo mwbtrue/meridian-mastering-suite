@@ -1,4 +1,5 @@
 #include "TruePeakLimiter.h"
+#include "../common/FastMath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -12,7 +13,7 @@ namespace
     constexpr double kLn10Over20 = 0.11512925464970228;   // ln(10) / 20
 
     inline double dbToLin (double db) noexcept   { return std::exp (db * kLn10Over20); }
-    inline double linToDb (double g) noexcept    { return 20.0 * std::log10 (std::max (g, 1.0e-12)); }
+    inline double linToDb (double g) noexcept    { return fastmath::ampToDb (std::max (g, 1.0e-12)); }
 }
 
 const TruePeakLimiter::StyleSettings& TruePeakLimiter::getStyle (int s) noexcept
@@ -199,7 +200,7 @@ void TruePeakLimiter::processBlock (double* L, double* R, int numSamples) noexce
         {
             double gr = ratioFactor * (linToDb (d) - thr1Db);
             if (st.warmGr)
-                gr = std::tanh (gr * 1.1) / 1.1;
+                gr = fastmath::tanh (gr * 1.1) / 1.1;
             r1 = dbToLin (-gr);
         }
 
@@ -216,7 +217,7 @@ void TruePeakLimiter::processBlock (double* L, double* R, int numSamples) noexce
 
             if (autoRelease)
             {
-                const double rmsDb = 10.0 * std::log10 (rmsPower + 1.0e-24);
+                const double rmsDb = fastmath::powerToDb (rmsPower + 1.0e-24);
                 followerDb += followerCoeff * (rmsDb - followerDb);
                 const double trend = std::clamp ((rmsDb - followerDb) / 6.0, -1.0, 1.0);
                 currentReleaseMs = std::clamp (st.releaseMs * std::exp2 (-trend), st.releaseMinMs, st.releaseMaxMs);
@@ -225,8 +226,8 @@ void TruePeakLimiter::processBlock (double* L, double* R, int numSamples) noexce
         }
 
         // ---------------- Stage 2: true-peak requirement ----------------
-        const double tpL = detector.process (0, sL);
-        const double tpR = detector.process (1, sR);
+        const double tpL = detector.processAgainst (0, sL, c2);
+        const double tpR = detector.processAgainst (1, sR, c2);
 
         const double lfL = std::abs (lfLowPass[0][1].process (lfLowPass[0][0].process (sL)));
         const double lfR = std::abs (lfLowPass[1][1].process (lfLowPass[1][0].process (sR)));
@@ -258,8 +259,8 @@ void TruePeakLimiter::processBlock (double* L, double* R, int numSamples) noexce
         const double yR = stage2Line[1].processSample (sR, stage2Delay) * g2R;
 
         // ---------------- Backstop: independent 16x guarantee ----------------
-        const double bpL = backstopDetector.process (0, yL);
-        const double bpR = backstopDetector.process (1, yR);
+        const double bpL = backstopDetector.processAgainst (0, yL, cb);
+        const double bpR = backstopDetector.processAgainst (1, yR, cb);
         const double gbL = backstopSmoother[0].process (bpL > cb ? cb / bpL : 1.0, backstopRel);
         const double gbR = backstopSmoother[1].process (bpR > cb ? cb / bpR : 1.0, backstopRel);
 

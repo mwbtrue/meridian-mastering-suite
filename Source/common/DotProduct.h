@@ -7,6 +7,11 @@
 // accumulators (SSE2 on x86-64, NEON on arm64, scalar fallback elsewhere).
 // Unaligned loads: callers pass arbitrary offsets into history buffers.
 
+#if defined(__AVX__)
+ #include <immintrin.h>
+ #define MERIDIAN_DOT_AVX 1     // MERIDIAN_ENABLE_AVX2=ON (/arch:AVX2 or -mavx2)
+#endif
+
 #if defined(__SSE2__) || defined(_M_X64) || defined(_M_AMD64)
  #include <emmintrin.h>
  #define MERIDIAN_DOT_SSE2 1
@@ -22,7 +27,24 @@ inline double dotProduct (const double* a, const double* b, int n) noexcept
     int i = 0;
     double sum = 0.0;
 
-#if defined(MERIDIAN_DOT_SSE2)
+#if defined(MERIDIAN_DOT_AVX)
+    __m256d acc0 = _mm256_setzero_pd(), acc1 = _mm256_setzero_pd(), acc2 = _mm256_setzero_pd(), acc3 = _mm256_setzero_pd();
+
+    for (; i + 16 <= n; i += 16)
+    {
+        acc0 = _mm256_add_pd (acc0, _mm256_mul_pd (_mm256_loadu_pd (a + i),      _mm256_loadu_pd (b + i)));
+        acc1 = _mm256_add_pd (acc1, _mm256_mul_pd (_mm256_loadu_pd (a + i + 4),  _mm256_loadu_pd (b + i + 4)));
+        acc2 = _mm256_add_pd (acc2, _mm256_mul_pd (_mm256_loadu_pd (a + i + 8),  _mm256_loadu_pd (b + i + 8)));
+        acc3 = _mm256_add_pd (acc3, _mm256_mul_pd (_mm256_loadu_pd (a + i + 12), _mm256_loadu_pd (b + i + 12)));
+    }
+
+    for (; i + 4 <= n; i += 4)
+        acc0 = _mm256_add_pd (acc0, _mm256_mul_pd (_mm256_loadu_pd (a + i), _mm256_loadu_pd (b + i)));
+
+    const __m256d s4 = _mm256_add_pd (_mm256_add_pd (acc0, acc1), _mm256_add_pd (acc2, acc3));
+    const __m128d s = _mm_add_pd (_mm256_castpd256_pd128 (s4), _mm256_extractf128_pd (s4, 1));
+    sum = _mm_cvtsd_f64 (s) + _mm_cvtsd_f64 (_mm_unpackhi_pd (s, s));
+#elif defined(MERIDIAN_DOT_SSE2)
     __m128d acc0 = _mm_setzero_pd(), acc1 = _mm_setzero_pd(), acc2 = _mm_setzero_pd(), acc3 = _mm_setzero_pd();
 
     for (; i + 8 <= n; i += 8)
@@ -74,7 +96,26 @@ inline double symmetricDotProduct (const double* h, const double* x, int n) noex
     int j = 0;
     double sum = 0.0;
 
-#if defined(MERIDIAN_DOT_SSE2)
+#if defined(MERIDIAN_DOT_AVX)
+    __m256d acc0 = _mm256_setzero_pd(), acc1 = _mm256_setzero_pd();
+
+    for (; j + 8 <= half; j += 8)
+    {
+        // reversed loads: {x[n-4-j] .. x[n-1-j]} permuted to descending order
+        const __m256d r0 = _mm256_loadu_pd (x + n - 4 - j);
+        const __m256d r1 = _mm256_loadu_pd (x + n - 8 - j);
+        const __m256d v0 = _mm256_permute2f128_pd (_mm256_permute_pd (r0, 0x5), _mm256_permute_pd (r0, 0x5), 0x01);
+        const __m256d v1 = _mm256_permute2f128_pd (_mm256_permute_pd (r1, 0x5), _mm256_permute_pd (r1, 0x5), 0x01);
+        const __m256d f0 = _mm256_add_pd (_mm256_loadu_pd (x + j),     v0);
+        const __m256d f1 = _mm256_add_pd (_mm256_loadu_pd (x + j + 4), v1);
+        acc0 = _mm256_add_pd (acc0, _mm256_mul_pd (_mm256_loadu_pd (h + j),     f0));
+        acc1 = _mm256_add_pd (acc1, _mm256_mul_pd (_mm256_loadu_pd (h + j + 4), f1));
+    }
+
+    const __m256d s4 = _mm256_add_pd (acc0, acc1);
+    const __m128d s = _mm_add_pd (_mm256_castpd256_pd128 (s4), _mm256_extractf128_pd (s4, 1));
+    sum = _mm_cvtsd_f64 (s) + _mm_cvtsd_f64 (_mm_unpackhi_pd (s, s));
+#elif defined(MERIDIAN_DOT_SSE2)
     __m128d acc0 = _mm_setzero_pd(), acc1 = _mm_setzero_pd();
 
     for (; j + 4 <= half; j += 4)

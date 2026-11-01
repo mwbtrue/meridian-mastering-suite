@@ -3,6 +3,7 @@
 #include <juce_dsp/juce_dsp.h>
 
 #include "DelayLine.h"
+#include "RealFFT.h"
 
 #include <array>
 #include <memory>
@@ -34,7 +35,7 @@ namespace meridian
 
     Convolution:
       Uniformly partitioned overlap-save (partition P = 256, FFT 2P) using
-      juce::dsp::FFT. The input spectrum delay line is shared by all bands of a
+      meridian::RealFFT (split re/im spectra). The input spectrum delay line is shared by all bands of a
       channel. Latency = P + D samples (1280 at 44.1/48 kHz).
 
     Frequency changes:
@@ -131,10 +132,9 @@ private:
     std::vector<double> window, lpPrev, lpCur, bandKernel;
 
     // FFT
-    std::unique_ptr<juce::dsp::FFT> fft;
-    std::vector<float> fftWork;      // 2 * (2P) floats
+    RealFFT fft;
+    std::vector<float> fftWork;      // 2P time-domain floats
     std::vector<float> accum;        // (P + 1) complex
-    std::vector<float> accumOld;     // (P + 1) complex
 
     // Per-channel state
     struct Channel

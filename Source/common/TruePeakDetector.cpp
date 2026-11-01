@@ -79,6 +79,18 @@ void TruePeakDetector::prepare (int maxFactorToUse, int halfSpanSamples, double 
                 c[i] /= sum;
         }
 
+        t.gainBound = 1.0;
+        for (int p = 0; p < t.factor; ++p)
+        {
+            const double* c = t.coeffs.data() + (size_t) (p * length);
+            double absSum = 0.0;
+            for (int i = 0; i < length; ++i)
+                absSum += std::abs (c[i]);
+            t.gainBound = std::max (t.gainBound, absSum);
+        }
+        // Margin for the rounding of the dot products (|error| << 1e-12 relative).
+        t.gainBound *= 1.0 + 1.0e-12;
+
         const int pairs = t.factor / 2;
         t.even.assign ((size_t) ((pairs + 1) * halfSpan), 0.0);
         t.odd.assign ((size_t) ((pairs + 1) * halfSpan), 0.0);
@@ -116,20 +128,39 @@ void TruePeakDetector::reset() noexcept
     {
         std::fill (ch.history.begin(), ch.history.end(), 0.0);
         ch.writePos = 0;
+        ch.windowMax = 0.0;
     }
 }
 
-double TruePeakDetector::process (int chIndex, double x) noexcept
+double TruePeakDetector::pushSample (int chIndex, double x) noexcept
 {
     auto& ch = channels[(size_t) chIndex];
-
-    if (ch.history.empty() || active == nullptr)
-        return std::abs (x);
+    const double evicted = std::abs (ch.history[(size_t) ch.writePos]);
 
     ch.history[(size_t) ch.writePos] = x;
     ch.history[(size_t) (ch.writePos + length)] = x;
     ch.writePos = ch.writePos + 1 == length ? 0 : ch.writePos + 1;
 
+    const double ax = std::abs (x);
+
+    if (ax >= ch.windowMax)
+        ch.windowMax = ax;
+    else if (evicted >= ch.windowMax)
+    {
+        // The maximum left the window: rescan (exact; happens once per peak).
+        const double* window = ch.history.data() + ch.writePos;
+        double m = 0.0;
+        for (int i = 0; i < length; ++i)
+            m = std::max (m, std::abs (window[i]));
+        ch.windowMax = m;
+    }
+
+    return ch.windowMax;
+}
+
+double TruePeakDetector::evaluate (int chIndex) const noexcept
+{
+    const auto& ch = channels[(size_t) chIndex];
     const double* window = ch.history.data() + ch.writePos;   // oldest -> newest
     double peak = std::abs (window[halfSpan - 1]);             // phase 0 == centre sample
 
@@ -161,6 +192,28 @@ double TruePeakDetector::process (int chIndex, double x) noexcept
     }
 
     return peak;
+}
+
+double TruePeakDetector::process (int chIndex, double x) noexcept
+{
+    if (channels[(size_t) chIndex].history.empty() || active == nullptr)
+        return std::abs (x);
+
+    pushSample (chIndex, x);
+    return evaluate (chIndex);
+}
+
+double TruePeakDetector::processAgainst (int chIndex, double x, double threshold) noexcept
+{
+    if (channels[(size_t) chIndex].history.empty() || active == nullptr)
+        return std::abs (x);
+
+    const double bound = pushSample (chIndex, x) * (active->factor < 2 ? 1.0 : active->gainBound);
+
+    if (bound <= threshold)
+        return bound;
+
+    return evaluate (chIndex);
 }
 
 //==============================================================================

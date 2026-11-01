@@ -21,6 +21,8 @@ meridian_add_test(null_test          null_test.cpp ${LIMITER_SRC})
 meridian_add_test(limiter_tp_test    limiter_tp_test.cpp ${LIMITER_SRC})
 meridian_add_test(lufs_test          lufs_test.cpp "${MERIDIAN_SRC}/analysis/MeteringEngine.cpp"
                                      "${MERIDIAN_SRC}/common/TruePeakDetector.cpp" "${MERIDIAN_SRC}/common/Biquad.cpp")
+meridian_add_test(fft_test           fft_test.cpp)
+meridian_add_test(fastmath_test      fastmath_test.cpp)
 meridian_add_test(crossover_sum_test crossover_sum_test.cpp "${MERIDIAN_SRC}/common/LinearPhaseCrossover.cpp"
                                      "${MERIDIAN_SRC}/common/LinearPhaseFIR.cpp")
 # Tests that instantiate the complete processor link the plugin's SharedCode

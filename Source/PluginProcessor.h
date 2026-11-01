@@ -195,12 +195,16 @@ public:
 
     // ---- Metering (UI thread consumers) -------------------------------------
     bool popMeterData (MeterData& out) noexcept           { return meterQueue.pop (out); }
-    bool popSpectrumFrame (SpectrumFrame& out) noexcept   { return spectrumQueue.pop (out); }
+    /** Computes the next spectrum frame from audio the processor has already
+        captured (message thread only). The FFTs run here, on the caller's
+        thread, so the audio thread only copies samples into the analyser's
+        ring. Returns false when no new hop is available or while the
+        analyser is being re-prepared. */
+    bool popSpectrumFrame (SpectrumFrame& out) noexcept;
     void requestIntegratedLoudnessReset() noexcept        { resetLoudnessRequested.store (true); }
     double getCurrentSampleRate() const noexcept          { return currentSampleRate; }
 
     meridian::LockFreeQueue<MeterData, 512> meterQueue;
-    meridian::LockFreeQueue<SpectrumFrame, 8> spectrumQueue;
 
     // ---- Analysis services (message-thread API; see each class for threading) ----
     meridian::IntelligentAssistant& getAssistant() noexcept    { return assistant; }
@@ -289,6 +293,7 @@ private:
     int captureSize = 0;
     std::atomic<double> captureRate { 48000.0 };
     mutable juce::CriticalSection captureLock;
+    juce::SpinLock spectrumLock;   // prepare/reset vs. the message-thread consumer
 
     /** Slot -> ModuleId, owned by the audio thread (validated copy of module_order params). */
     int moduleOrder[kNumModules] {};
@@ -307,7 +312,6 @@ private:
 
     // Scratch buffers (allocated in prepareToPlay)
     std::vector<double> bufL, bufR, dryL, dryR, deltaL, deltaR;
-    SpectrumFrame spectrumScratch;
 
     double currentSampleRate = 48000.0;
     int maxBlockSize = 0;

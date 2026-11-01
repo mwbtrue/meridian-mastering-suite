@@ -115,6 +115,7 @@ bool SpectrumAnalyzer::getNextFrame (SpectrumFrame& frame) noexcept
     }
 
     frame.sampleRate = sampleRate;
+    frame.samplePosition = (std::int64_t) (nextFrameEnd - kHop);
     return true;
 }
 

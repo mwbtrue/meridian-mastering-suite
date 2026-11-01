@@ -22,6 +22,8 @@ set(MERIDIAN_SOURCE_FILES
     common/MidSideMatrix.h
     common/DelayLine.h
     common/DotProduct.h
+    common/RealFFT.h
+    common/FastMath.h
     common/AnalysisTypes.h
     common/LinearPhaseFIR.h
     common/LinearPhaseFIR.cpp

@@ -1,4 +1,5 @@
 #include "DynamicEQ.h"
+#include "../common/FastMath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -300,7 +301,7 @@ void DynamicEQ::updateParameters() noexcept
 
 double DynamicEQ::computeGainDb (const Band& b) const noexcept
 {
-    const double envDb = 10.0 * std::log10 (b.meanSquare + 1.0e-30);
+    const double envDb = fastmath::powerToDb (b.meanSquare + 1.0e-30);
     const double over = envDb - b.thresholdDb;
 
     if (over <= 0.0)

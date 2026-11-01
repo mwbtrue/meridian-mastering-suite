@@ -43,6 +43,15 @@ cmake -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
 
+Faster build for any PC made since about 2013 (Intel Haswell / AMD Excavator or newer), which uses AVX2:
+
+```bat
+cmake -B build -G "Visual Studio 17 2022" -A x64 -DMERIDIAN_ENABLE_AVX2=ON
+cmake --build build --config Release
+```
+
+A plugin built this way will not load on a CPU without AVX2. The default build runs on any x64 CPU.
+
 Output: `build\MeridianMasteringSuite_artefacts\Release\VST3\Meridian Mastering Suite.vst3`
 
 ## 4. Installing in FL Studio 21
@@ -81,14 +90,14 @@ Copy the `.vst3` bundle to `~/.vst3/`.
 ## 7. Running Tests
 
 ```bash
-cd build && ctest --output-on-failure        # all 8 tests
+cd build && ctest --output-on-failure        # all 10 tests
 ctest -L unit                                # DSP unit tests only
 ./tests/cpu_bench --per-module               # CPU verdict (< 15 %) and per-module cost
 ```
 
 On Windows with Visual Studio, use `ctest -C Release --output-on-failure`.
 
-Expected result: **8/8 PASS**. Measured on Linux: CPU 13.2–13.7 % of one core at 48 kHz / 512.
+Expected result: **10/10 PASS**. Measured on Linux: CPU 9.85 % of one core at 48 kHz / 512 (8.71 % with AVX2). See ARCH.md §7 for the Windows history.
 
 | Test | What it checks |
 |---|---|
@@ -96,6 +105,8 @@ Expected result: **8/8 PASS**. Measured on Linux: CPU 13.2–13.7 % of one core 
 | `limiter_tp_test` | True peak ≤ ceiling at 4× / 8× / 16× across 7 stress signals |
 | `lufs_test` | −23 dBFS 1 kHz sine reads −23.0 ± 0.2 LUFS at 44.1 / 48 / 96 kHz |
 | `ebu_loudness_test` | EBU Tech 3341 / 3342 cases within ±0.1 LU (LRA ±1 LU) |
+| `fft_test` | Real FFT used by the crossovers matches a direct DFT and round-trips |
+| `fastmath_test` | Inline exp / log / tanh match the C runtime to full double precision |
 | `crossover_sum_test` | Linear-phase band sum flat within ±0.05 dB |
 | `chain_null_test` | Full chain, all bypassed and all neutral, nulls below −140 dBFS |
 | `lm_undo_test` | Loudness-matched bypass level and undo/redo values |

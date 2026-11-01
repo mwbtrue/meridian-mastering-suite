@@ -36,10 +36,9 @@ void LinearPhaseCrossover::prepare (double sampleRate, int /*maxBlockSize*/)
     lpCur.assign ((size_t) numTaps, 0.0);
     bandKernel.assign ((size_t) numTaps, 0.0);
 
-    fft = std::make_unique<juce::dsp::FFT> (juce::roundToInt (std::log2 (2.0 * P)));
-    fftWork.assign ((size_t) (4 * P), 0.0f);
+    fft.prepare (2 * P);
+    fftWork.assign ((size_t) (2 * P), 0.0f);
     accum.assign ((size_t) (2 * kBins), 0.0f);
-    accumOld.assign ((size_t) (2 * kBins), 0.0f);
     tempOld.assign ((size_t) P, 0.0);
     tempNew.assign ((size_t) P, 0.0);
 
@@ -179,8 +178,7 @@ void LinearPhaseCrossover::designInto (KernelSet& set) noexcept
             for (int i = 0; i < count; ++i)
                 fftWork[(size_t) i] = static_cast<float> (bandKernel[(size_t) (start + i)]);
 
-            fft->performRealOnlyForwardTransform (fftWork.data(), true);
-            std::copy (fftWork.begin(), fftWork.begin() + 2 * kBins, set.parts[(size_t) b][(size_t) p].begin());
+            fft.forward (fftWork.data(), set.parts[(size_t) b][(size_t) p].data());
         }
 
         std::swap (lpPrev, lpCur);
@@ -238,26 +236,27 @@ void LinearPhaseCrossover::convolveBand (int c, const KernelSet& set, int band, 
 {
     auto& ch = channels[(size_t) c];
     std::fill (accum.begin(), accum.end(), 0.0f);
-    float* acc = accum.data();
+    float* __restrict accRe = accum.data();
+    float* __restrict accIm = accum.data() + kBins;
 
+    // Split layout (re block, im block): a plain element-wise loop that every
+    // compiler vectorises.
     for (int p = 0; p < numPartitions; ++p)
     {
         const int idx = (fdlPos - p + numPartitions) % numPartitions;
-        const float* X = ch.fdl[(size_t) idx].data();
-        const float* H = set.parts[(size_t) band][(size_t) p].data();
+        const float* __restrict Xr = ch.fdl[(size_t) idx].data();
+        const float* __restrict Xi = Xr + kBins;
+        const float* __restrict Hr = set.parts[(size_t) band][(size_t) p].data();
+        const float* __restrict Hi = Hr + kBins;
 
         for (int k = 0; k < kBins; ++k)
         {
-            const float xr = X[2 * k], xi = X[2 * k + 1];
-            const float hr = H[2 * k], hi = H[2 * k + 1];
-            acc[2 * k]     += xr * hr - xi * hi;
-            acc[2 * k + 1] += xr * hi + xi * hr;
+            accRe[k] += Xr[k] * Hr[k] - Xi[k] * Hi[k];
+            accIm[k] += Xr[k] * Hi[k] + Xi[k] * Hr[k];
         }
     }
 
-    std::fill (fftWork.begin(), fftWork.end(), 0.0f);
-    std::copy (accum.begin(), accum.end(), fftWork.begin());
-    fft->performRealOnlyInverseTransform (fftWork.data());
+    fft.inverse (accum.data(), fftWork.data());
 
     // Overlap-save: the second half of the circular result is the valid linear convolution.
     for (int i = 0; i < P; ++i)
@@ -291,10 +290,7 @@ void LinearPhaseCrossover::processPartition() noexcept
         for (int i = 0; i < P; ++i)
             ch.history[(size_t) (P + i)] = static_cast<float> (ch.inFifo[(size_t) i]);
 
-        std::fill (fftWork.begin(), fftWork.end(), 0.0f);
-        std::copy (ch.history.begin(), ch.history.end(), fftWork.begin());
-        fft->performRealOnlyForwardTransform (fftWork.data(), true);
-        std::copy (fftWork.begin(), fftWork.begin() + 2 * kBins, ch.fdl[(size_t) fdlPos].begin());
+        fft.forward (ch.history.data(), ch.fdl[(size_t) fdlPos].data());
 
         auto& top = ch.outFifo[(size_t) (nb - 1)];
         std::copy (ch.delayFifo.begin(), ch.delayFifo.end(), top.begin());

@@ -14,3 +14,4 @@ CMakeFiles/
 .DS_Store
 Thumbs.db
 .abacus.donotdelete
+build-avx/

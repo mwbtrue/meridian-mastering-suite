@@ -31,9 +31,10 @@ namespace meridian
                      consumer has fallen more than the ring's slack behind,
                      it skips ahead to the newest data instead of reading
                      overwritten samples.
-    The processor calls getNextFrame() right after pushSamples() and forwards
-    frames to the UI through its LockFreeQueue<SpectrumFrame, 8>, so nothing
-    ever blocks. JUCE's FFT for N = 2048 uses stack scratch space and the
+    The audio thread only calls pushSamples(). getNextFrame() is called from
+    the message thread (MeridianAudioProcessor::popSpectrumFrame), so the
+    FFTs never cost audio-thread time and are skipped entirely while no
+    editor is open. Nothing ever blocks the audio thread. JUCE's FFT for N = 2048 uses stack scratch space and the
     work buffers are pre-allocated in prepare(): no allocation per frame.
 */
 class SpectrumAnalyzer

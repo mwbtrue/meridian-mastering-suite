@@ -5,7 +5,7 @@
 //
 // Pass --fail-over=<percent> to make the exit code reflect the target (CTest
 // uses a generous limit because shared CI machines are noisy). --per-module
-// adds a per-module cost breakdown.
+// adds a per-module cost breakdown. --seconds=<n> shortens the main run.
 
 #include "PluginHarness.h"
 
@@ -52,17 +52,19 @@ int main (int argc, char** argv)
 
     double failOver = 1.0e9;
     bool perModule = false;
+    double seconds = 60.0;
     for (int a = 1; a < argc; ++a)
     {
         if (std::strncmp (argv[a], "--fail-over=", 12) == 0)
             failOver = std::atof (argv[a] + 12);
+        else if (std::strncmp (argv[a], "--seconds=", 10) == 0)
+            seconds = std::max (1.0, std::atof (argv[a] + 10));
         else if (std::strcmp (argv[a], "--per-module") == 0)
             perModule = true;
     }
 
     constexpr double sr = 48000.0;
     constexpr int block = 512;
-    constexpr double seconds = 60.0;
     const int n = (int) (seconds * sr);
 
     MeridianAudioProcessor p;
@@ -111,6 +113,14 @@ int main (int argc, char** argv)
             measure (p, srcL, srcR, sr, block, 0.5, nullptr);
             std::printf ("  %-14s %6.2f %%\n", std::string (meridian::kModuleNames[(size_t) m]).c_str(), ref - without);
         }
+
+        // Everything outside the modules: metering, spectrum, capture ring,
+        // dry-path delay compensation, loudness-match tracking.
+        for (int m = 0; m < meridian::kNumModules; ++m)
+            test::setParam (p, meridian::pid::slotParam (meridian::pid::moduleBypassPrefix, m), 1.0f);
+        measure (p, srcL, srcR, sr, block, 0.5, nullptr);
+        std::printf ("  %-14s %6.2f %%   (all modules bypassed: framework overhead)\n", "Framework", best());
+        std::printf ("  %-14s %6.2f %%   (best-of-5 full chain used as reference)\n", "Full chain", ref);
     }
 
     p.releaseResources();

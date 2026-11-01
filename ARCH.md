@@ -276,11 +276,11 @@ Total latency is computed in `PluginProcessor::computeChainLatency()` whenever p
 ```
 Audio Thread (RT):
   processBlock() → per-module process() → write meters to LockFreeQueue<MeterData,512>
-                                         → write spectrum to LockFreeQueue<FFTData,8>
+                                         → copy samples into the SpectrumAnalyzer FIFO (no FFT)
 
 UI/Timer Thread (60 fps Timer callback):
   drain MeterData queue → update meter display
-  drain FFTData queue → update spectrum display
+  popSpectrumFrame() → runs the 2048-pt FFTs on the message thread → update spectrum display
   read APVTS state → update parameter displays
 
 Codec Preview Thread (background std::thread):
@@ -290,39 +290,43 @@ Analysis Thread (background std::thread):
   offline analysis pass → post proposals via MessageManager::callAsync
 ```
 
-All cross-thread communication uses LockFreeQueue<T,N> (SPSC ring buffer, power-of-2 size, std::atomic<> head/tail, no mutex). APVTS parameter reads on the audio thread use RawParameterValue atomic pointers (JUCE standard pattern). No std::mutex, no new/delete, no file I/O on the audio thread.
+Spectrum: the audio thread only copies samples into the analyser's sample FIFO. The 2048-point FFTs (L, R, M, S) run inside `popSpectrumFrame()` on the message thread, under a `juce::SpinLock` that the audio thread never takes; only `prepareToPlay`/`releaseResources` (non-real-time) take it to resize the analyser. Before this change the FFTs ran on the audio thread and were the largest single item in the Windows CPU measurement.
+
+All other cross-thread communication uses LockFreeQueue<T,N> (SPSC ring buffer, power-of-2 size, std::atomic<> head/tail, no mutex). APVTS parameter reads on the audio thread use RawParameterValue atomic pointers (JUCE standard pattern). No std::mutex, no new/delete, no file I/O on the audio thread.
 
 ---
 
 ## 7. CPU Budget (measured, 48 kHz / 512 samples / single core)
 
-Measured with `tests/cpu_bench` (60 s of stereo pink noise, default chain, double precision, Release build with LTO, GCC on a Linux x86-64 VM). Per-module figures use `--per-module`: full chain minus the chain with that module bypassed, best of 5 × 4 s runs. Per-module values carry about ±0.3 % of scheduler noise, which is why one reads slightly negative.
+Measured with `tests/cpu_bench` (60 s of stereo pink noise, default chain, double precision, Release build with LTO, GCC on a Linux x86-64 VM). Per-module figures use `--per-module`: full chain minus the chain with that module bypassed, best of 5 × 4 s runs. Per-module values carry about ±0.4 % of scheduler noise, which is why some read slightly negative. `--per-module` also prints the framework cost (all modules bypassed) and the best-of-5 full-chain reference.
 
-| Module | Measured CPU (% of one core) |
-|---|---|
-| Input | 0.02 |
-| CorrectiveEQ | 0.21 |
-| LowEndControl | 0.09 |
-| DynamicEQ | 0.61 |
-| GlueCompressor | ≈ 0 (−0.28, noise) |
-| MultibandDynamics | 1.47 |
-| ToneEQ | 0.15 |
-| Saturation (4× OS, tape RK4) | 2.86 |
-| StereoImager | 1.22 |
-| Clipper (8× OS) | 2.16 |
-| TruePeakLimiter (16× backstop) | 2.01 |
-| Dither | 0.20 |
-| **Full default chain incl. metering** | **13.15–13.65 %** (worst single block 21 % of its real-time budget) |
+| Module | Default build (SSE2) | `MERIDIAN_ENABLE_AVX2=ON` |
+|---|---|---|
+| Input | 0.43 | ≈ 0 |
+| CorrectiveEQ | 0.68 | 0.24 |
+| LowEndControl | 0.53 | 0.04 |
+| DynamicEQ | 1.09 | 0.74 |
+| GlueCompressor | 0.71 | 0.07 |
+| MultibandDynamics | 1.29 | 0.16 |
+| ToneEQ | 0.56 | 0.09 |
+| Saturation (4× OS, tape RK4) | 2.86 | 1.56 |
+| StereoImager | 1.11 | ≈ 0 |
+| Clipper (8× OS) | 2.64 | 1.32 |
+| TruePeakLimiter (16× backstop) | 2.40 | 0.62 |
+| Dither | 0.79 | ≈ 0 |
+| Framework (all bypassed, incl. metering) | 0.38 | 0.41 |
+| **Full default chain, 60 s average** | **9.85 %** (worst block 17.7 %) | **8.71 %** (worst block 16.8 %) |
 
-Target: < 15 %. The default chain measured 22.0 % before optimisation. Two changes brought it under target:
-- `common/DotProduct.h`: an SSE2/NEON dot product with 4 accumulators. The build uses `-fno-fast-math`, so the compiler does not vectorise floating-point reductions itself.
-- Folded symmetric FIR evaluation:
-  - The oversampler's decimation filter is a symmetric Kaiser sinc, so it is evaluated with a folded dot product at half the multiplies.
-  - In the `TruePeakDetector`, phase *f − p* is phase *p* mirrored, so each pair of phases shares one folded window (sum/difference against even/odd kernel halves).
+Target: < 15 %. History of the full-chain figure:
+1. 22.0 % (Linux) before any optimisation. `common/DotProduct.h` (SSE2/NEON dot product, 4 accumulators; AVX when built with `MERIDIAN_ENABLE_AVX2=ON`) and folded symmetric FIR evaluation (oversampler decimator, true-peak phase pairs) brought it to 13.15–13.65 %.
+2. **24.26 % on the user's Windows PC (MSVC 2022), worst block 94 %: over target**, while the Linux build read 13.65 %. The per-module costs only added up to about 10 %, so most of the load was outside the modules. Causes found and fixed:
+   - The spectrum analyser ran four 2048-point FFTs on the audio thread (framework cost 2.02 % → 0.38 % on Linux). They now run on the message thread (§6).
+   - The linear-phase crossovers (Multiband + Imager, 2 channels × 3 bands each) used `juce::dsp::FFT`, which without IPP falls back to JUCE's generic complex FFT on Windows. `common/RealFFT.h` is a dedicated real FFT (N/2 complex radix-2 plus split step) with a split re/im layout, so the spectral multiply-accumulate is a plain vectorisable loop. Checked by `fft_test`.
+   - MSVC's `tanh`, `log10` and `pow` under `/fp:precise` are out-of-line library calls that are much slower than glibc's. The per-sample calls (Saturation, Clipper, compressor detectors, dynamic EQ, low-end control, limiter) now use `common/FastMath.h`: inline exp/log/tanh with full double accuracy (max error 3.3e-16, checked by `fastmath_test`), exact at 0 so neutral settings still null.
+   - The limiter's true-peak detectors skip the polyphase evaluation when a rigorous bound (worst-phase Σ|c| × window maximum) proves the peak is under the threshold. The gain decision is bit-identical.
+3. 9.85 % (Linux, default build) and 8.71 % with AVX2 after these changes. All tests were re-run with identical pass results.
 
-The limiter, LUFS, EBU and null tests were re-run after this change, with identical results (worst TP −1.0856 dBTP, null −256.5 dBFS).
-
-The CTest `cpu_bench` entry fails only above 30 %, so CI machines that are slower or shared do not give false failures. Run `./tests/cpu_bench` directly for the 15 % verdict. These figures are from a Linux VM. They have not been measured on Windows or in FL Studio.
+The CTest `cpu_bench` entry fails only above 30 %, so CI machines that are slower or shared do not give false failures. Run `./tests/cpu_bench` directly for the 15 % verdict. The figures in the table are from a Linux VM. After the fixes above the Windows figure has not yet been re-measured.
 
 ---
 
@@ -369,11 +373,13 @@ The CTest `cpu_bench` entry fails only above 30 %, so CI machines that are slowe
 ### LowEndControl identity path
 When both the mono-maker and the dynamic section are off, the module outputs its input exactly. Its filters keep running, and the processed path crossfades in over 15 ms when either section is engaged. Before this change, the LR4 split-and-sum all-pass phase shift kept a neutral LowEndControl from nulling.
 
-### Verification programs (`tests/`, CTest — 8/8 pass)
+### Verification programs (`tests/`, CTest — 10/10 pass)
 - `null_test`: pink noise at −6 dBFS through the limiter at a 0 dBTP ceiling, compared with the latency-aligned input (pass < −140 dBFS; measured −256.5 dBFS).
 - `limiter_tp_test`: 7 signals × 4/8/16× at −1 dBTP, measured with an independent ±64-tap Blackman-sinc 16× estimator. Each signal is followed by silence so the signal's own end is limited too (pass: TP ≤ ceiling; worst −1.0856 dBTP).
 - `lufs_test`: 1 kHz sine at −23 dBFS for 10 s at 48 / 44.1 / 96 kHz (pass −23.0 ± 0.2 LUFS).
 - `ebu_loudness_test`: EBU Tech 3341 / 3342 conformance cases, synthesised, at 44.1 and 48 kHz (pass ±0.1 LU / LRA ±1 LU as specified; 32/32 pass).
+- `fft_test`: `RealFFT` forward/inverse against a direct DFT and round trip, sizes 16–4096 (errors ~1e-7 in float).
+- `fastmath_test`: `FastMath` exp/log/tanh against the C runtime over the audio range (max error ≤ 3.3e-16) and exact identities exp(0) = 1, tanh(0) = 0, log(1) = 0.
 - `crossover_sum_test`: 1 s white noise, 120 / 1000 / 5000 Hz, band sum vs delayed input (pass < 0.05 dB), plus a per-band energy-share check to prove the split is real.
 - `chain_null_test`: the complete processor, 6 s stereo pink noise at 48 kHz / 512.
   - (a) All modules bypassed: −6000 dBFS (bit-exact).

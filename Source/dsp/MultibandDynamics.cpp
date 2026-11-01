@@ -1,4 +1,5 @@
 #include "MultibandDynamics.h"
+#include "../common/FastMath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -170,8 +171,8 @@ void MultibandDynamics::processBlock (double* L, double* R, int numSamples) noex
 
                 if (midSideActive)
                 {
-                    const double gM = std::pow (10.0, b.core[0].processPower (bl[i] * bl[i]) * 0.05) * mk;
-                    const double gS = std::pow (10.0, b.core[1].processPower (br[i] * br[i]) * 0.05) * mk;
+                    const double gM = fastmath::dbToAmp (b.core[0].processPower (bl[i] * bl[i])) * mk;
+                    const double gS = fastmath::dbToAmp (b.core[1].processPower (br[i] * br[i])) * mk;
                     blockGr[(size_t) bi] = std::max (blockGr[(size_t) bi],
                                                      en * std::max (b.core[0].getGainReductionDb(), b.core[1].getGainReductionDb()));
                     bl[i] *= 1.0 + en * (gM - 1.0);
@@ -180,7 +181,7 @@ void MultibandDynamics::processBlock (double* L, double* R, int numSamples) noex
                 else
                 {
                     const double power = 0.5 * (bl[i] * bl[i] + br[i] * br[i]);
-                    const double g = std::pow (10.0, b.core[0].processPower (power) * 0.05) * mk;
+                    const double g = fastmath::dbToAmp (b.core[0].processPower (power)) * mk;
                     blockGr[(size_t) bi] = std::max (blockGr[(size_t) bi], en * b.core[0].getGainReductionDb());
                     const double applied = 1.0 + en * (g - 1.0);
                     bl[i] *= applied;

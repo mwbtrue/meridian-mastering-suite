@@ -424,9 +424,11 @@ void MeridianAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     outputGain.reset (juce::Decibels::decibelsToGain (static_cast<double> (outputGainParam->load())));
 
     meteringEngine.prepare (currentSampleRate, maxBlockSize);
-    spectrumAnalyzer.prepare (currentSampleRate, maxBlockSize);
+    {
+        const juce::SpinLock::ScopedLockType sl (spectrumLock);
+        spectrumAnalyzer.prepare (currentSampleRate, maxBlockSize);
+    }
     meterQueue.clear();
-    spectrumQueue.clear();
 
     {
         const juce::ScopedLock sl (captureLock);
@@ -470,7 +472,10 @@ void MeridianAudioProcessor::releaseResources()
     deltaDelayL.reset();
     deltaDelayR.reset();
     meteringEngine.reset();
-    spectrumAnalyzer.reset();
+    {
+        const juce::SpinLock::ScopedLockType sl (spectrumLock);
+        spectrumAnalyzer.reset();
+    }
 }
 
 bool MeridianAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -1077,12 +1082,12 @@ void MeridianAudioProcessor::pushMeters (int numSamples) noexcept
     referencePanel.setMainCrest (data.PLR);
 
     meterQueue.push (data);   // drops silently if the UI is not draining
+}
 
-    while (spectrumAnalyzer.getNextFrame (spectrumScratch))
-    {
-        spectrumScratch.samplePosition = samplePosition;
-        spectrumQueue.push (spectrumScratch);
-    }
+bool MeridianAudioProcessor::popSpectrumFrame (SpectrumFrame& out) noexcept
+{
+    const juce::SpinLock::ScopedTryLockType sl (spectrumLock);
+    return sl.isLocked() && spectrumAnalyzer.getNextFrame (out);
 }
 
 //==============================================================================

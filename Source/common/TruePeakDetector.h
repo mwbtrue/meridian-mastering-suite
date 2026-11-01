@@ -43,6 +43,15 @@ public:
         reconstructed signal on [n - halfSpan, n - halfSpan + 1). */
     double process (int ch, double x) noexcept;
 
+    /** Same as process(), but for callers that only compare the result against
+        `threshold`: when a rigorous bound (sum of |coefficients| of the worst phase
+        times the largest |sample| in the kernel window) proves the true peak cannot
+        exceed the threshold, the polyphase evaluation is skipped and that bound
+        (<= threshold) is returned. Whenever the result is > threshold it is exactly
+        the value process() would return, so any "peak > threshold" decision and
+        any gain derived from it are bit-identical to process(). */
+    double processAgainst (int ch, double x, double threshold) noexcept;
+
     int getLatencySamples() const noexcept { return halfSpan; }
     int getHalfSpan() const noexcept       { return halfSpan; }
 
@@ -57,9 +66,12 @@ private:
         //   y_p - y_(f-p) = sum_(i<halfSpan) odd_p[i]  * (w[i] - w[L-1-i])
         // with even/odd = c_p[i] +/- c_p[L-1-i]: ~half the multiplies.
         std::vector<double> even, odd;   // (factor / 2 + 1) * halfSpan, indexed by p
+        double gainBound = 1.0;          // max over phases of sum |c_p[i]|
     };
 
     static int indexForFactor (int f) noexcept;
+    double pushSample (int ch, double x) noexcept;    // returns |window max|
+    double evaluate (int ch) const noexcept;
 
     int halfSpan = 12;
     int length = 24;
@@ -72,10 +84,11 @@ private:
     {
         std::vector<double> history;   // 2 * length, mirrored
         int writePos = 0;
+        double windowMax = 0.0;        // max |x| over the current window (exact)
     };
 
     std::array<Channel, kMaxChannels> channels;
-    std::vector<double> foldSum, foldDiff;   // halfSpan scratch (audio thread)
+    mutable std::vector<double> foldSum, foldDiff;   // halfSpan scratch (audio thread)
 };
 
 /**

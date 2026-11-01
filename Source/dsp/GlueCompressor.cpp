@@ -1,4 +1,5 @@
 #include "GlueCompressor.h"
+#include "../common/FastMath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -85,7 +86,7 @@ double VcaCompressorCore::upwardGainDb (double x, double t, double r) noexcept
 
 void VcaCompressorCore::updateAutoRelease() noexcept
 {
-    const double levelDb = 10.0 * std::log10 (meanSquare + 1.0e-30);
+    const double levelDb = fastmath::powerToDb (meanSquare + 1.0e-30);
     const double diff = levelDb - levelMean;
     levelMean += windowCoeff * diff;
     levelVar += windowCoeff * (diff * diff - levelVar);
@@ -109,7 +110,7 @@ double VcaCompressorCore::processPower (double power) noexcept
         updateAutoRelease();
     }
 
-    const double levelDb = 10.0 * std::log10 (meanSquare + 1.0e-30);
+    const double levelDb = fastmath::powerToDb (meanSquare + 1.0e-30);
     const double down = downwardGainDb (levelDb, thresholdDb, ratio, kneeDb);
     lastGrDb = -down;
     return down + upwardGainDb (levelDb, upThresholdDb, upRatio);
@@ -230,7 +231,7 @@ void GlueCompressor::processBlock (double* L, double* R, int numSamples) noexcep
         const double dryL = delay[0].processSample (inL, lookaheadSamples);
         const double dryR = delay[1].processSample (inR, lookaheadSamples);
 
-        const double wetGain = std::pow (10.0, gainDb * 0.05) * makeupGain.processSample();
+        const double wetGain = fastmath::dbToAmp (gainDb) * makeupGain.processSample();
         const double m = mix.processSample();
         const double g = (1.0 - m) + m * wetGain;
 

@@ -1,4 +1,5 @@
 #include "LowEndControl.h"
+#include "../common/FastMath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -126,14 +127,14 @@ void LowEndControl::processBlock (double* L, double* R, int numSamples) noexcept
         const double sq = sc * sc;
         meanSquare += (sq > meanSquare ? attackCoeff : releaseCoeff) * (sq - meanSquare);
 
-        const double envDb = 10.0 * std::log10 (meanSquare + 1.0e-30);
+        const double envDb = fastmath::powerToDb (meanSquare + 1.0e-30);
         double targetGrDb = envDb > thresholdDb ? (envDb - thresholdDb) * slopeFactor : 0.0;
         targetGrDb = std::min (targetGrDb, maxGrDb) * dynMix.processSample();
 
         subGainDb += gainCoeff * (-targetGrDb - subGainDb);
         maxGrThisBlock = std::max (maxGrThisBlock, -subGainDb);
 
-        const double gSub = subGainDb > -1.0e-9 ? 1.0 : std::pow (10.0, subGainDb * 0.05);
+        const double gSub = subGainDb > -1.0e-9 ? 1.0 : fastmath::dbToAmp (subGainDb);
 
         const double mOut = gSub * mLo + mHi;
         const double sOut = monoGain.processSample() * sLo + sHi;

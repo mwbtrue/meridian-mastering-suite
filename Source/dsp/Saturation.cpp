@@ -1,4 +1,5 @@
 #include "Saturation.h"
+#include "../common/FastMath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -150,8 +151,8 @@ double Saturation::processTape (ModelState& s, double x, double g, double biasVa
     {
         // Start on the anhysteretic curve at the first field value (no transient).
         s.prevH = h1;
-        s.mIrr = (1.0 - kTapeC) * std::tanh (h1);
-        s.mTotal = s.mIrr + kTapeC * std::tanh (h1);
+        s.mIrr = (1.0 - kTapeC) * fastmath::tanh (h1);
+        s.mTotal = s.mIrr + kTapeC * fastmath::tanh (h1);
         s.hInit = true;
     }
 
@@ -182,7 +183,7 @@ double Saturation::processTape (ModelState& s, double x, double g, double biasVa
     }
 
     s.prevH = h1;
-    const double mRev = kTapeC * std::tanh (h1 + kTapeAlpha * s.mTotal);
+    const double mRev = kTapeC * fastmath::tanh (h1 + kTapeAlpha * s.mTotal);
     s.mTotal = s.mIrr + mRev;
     return s.mTotal / g;
 }
@@ -191,8 +192,8 @@ double Saturation::processTube (double x, double g, double biasValue) const noex
 {
     const double u = g * x;
     const double beta = std::clamp (0.15 + 0.35 * biasValue, -0.5, 0.5);
-    const double t = std::tanh (u);
-    return std::tanh (u + beta * t * t) / g;
+    const double t = fastmath::tanh (u);
+    return fastmath::tanh (u + beta * t * t) / g;
 }
 
 double Saturation::processTransformer (ModelState& s, double x, double g, double driveDbValue) const noexcept

@@ -1,4 +1,5 @@
 #include "Clipper.h"
+#include "../common/FastMath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -83,7 +84,7 @@ double Clipper::shape (int clipMode, double u, double c, double driveLin) noexce
 
         case (int) choices::ClipperMode::Soft:
         default:
-            y = c * std::tanh (u / c);
+            y = c * fastmath::tanh (u / c);
             break;
     }
 
