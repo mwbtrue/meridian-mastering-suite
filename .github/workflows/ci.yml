@@ -1,0 +1,200 @@
+# Meridian CI: build, CTest, pluginval, CPU benchmark (informational), and AU validation.
+#
+# Jobs
+#   windows  - VS2022 (matches the FL Studio dev machine), AVX2 off and on.
+#              CTest (unit + integration + pluginval_vst3), then cpu_bench --per-module.
+#   macos    - Universal (arm64 + x86_64) build, CTest incl. pluginval, then AU install + auval.
+#   linux    - Regression guard for the platform that already passes locally.
+#
+# CPU numbers from shared GitHub runners are noisy. cpu_bench runs as a separate,
+# non-blocking step; CTest's own cpu_bench test keeps its generous --fail-over=30 limit.
+# The 15 % target still has to be confirmed on a real Windows machine (notes rule R-001).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLUGINVAL_VERSION: latest   # or a tag such as v1.0.4
+
+jobs:
+  windows:
+    name: Windows (VS2022, AVX2=${{ matrix.avx2 }})
+    runs-on: windows-2022
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        avx2: [OFF, ON]
+    steps:
+      - uses: actions/checkout@v4
+
+
+      - name: Download pluginval
+        shell: pwsh
+        run: |
+          $base = if ($env:PLUGINVAL_VERSION -eq 'latest') { 'https://github.com/Tracktion/pluginval/releases/latest/download' } else { "https://github.com/Tracktion/pluginval/releases/download/$env:PLUGINVAL_VERSION" }
+          Invoke-WebRequest "$base/pluginval_Windows.zip" -OutFile pluginval.zip
+          Expand-Archive pluginval.zip -DestinationPath pluginval
+          "PLUGINVAL_EXE=$((Resolve-Path pluginval\pluginval.exe).Path)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DMERIDIAN_ENABLE_AVX2=${{ matrix.avx2 }} "-DPLUGINVAL_EXECUTABLE=${{ env.PLUGINVAL_EXE }}"
+
+      - name: Build (Release)
+        run: cmake --build build --config Release --parallel
+
+      - name: CTest (unit + integration + pluginval)
+        run: ctest --test-dir build -C Release --output-on-failure -LE perf --output-junit ctest-results.xml
+
+      - name: CPU benchmark (informational)
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse build\tests -Filter cpu_bench.exe | Where-Object { $_.FullName -match '\\Release\\' } | Select-Object -First 1
+          & $exe.FullName --per-module 2>&1 | Tee-Object -FilePath cpu_bench.txt
+          "### cpu_bench (Windows, AVX2=${{ matrix.avx2 }})" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          '```' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          Get-Content cpu_bench.txt | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          '```' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-windows-avx2-${{ matrix.avx2 }}
+          path: |
+            build/ctest-results.xml
+            cpu_bench.txt
+            build/Testing/Temporary/LastTest*.log
+
+      - name: Upload VST3
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Meridian-VST3-Windows-avx2-${{ matrix.avx2 }}
+          path: build/MeridianMasteringSuite_artefacts/Release/VST3
+
+  macos:
+    name: macOS (universal, AU + auval)
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Download pluginval
+        run: |
+          if [ "$PLUGINVAL_VERSION" = latest ]; then base=https://github.com/Tracktion/pluginval/releases/latest/download; else base=https://github.com/Tracktion/pluginval/releases/download/$PLUGINVAL_VERSION; fi
+          curl -sSL "$base/pluginval_macOS.zip" -o pluginval.zip
+          unzip -q pluginval.zip -d pluginval
+          echo "PLUGINVAL_EXE=$PWD/pluginval/pluginval.app/Contents/MacOS/pluginval" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPLUGINVAL_EXECUTABLE="$PLUGINVAL_EXE"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: CTest (unit + integration + pluginval)
+        run: ctest --test-dir build --output-on-failure -LE perf --output-junit ctest-results.xml
+
+      - name: Install AU and run auval
+        run: |
+          comp=$(find build/MeridianMasteringSuite_artefacts -name "*.component" -type d | head -1)
+          echo "Component: $comp"
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "$comp" ~/Library/Audio/Plug-Ins/Components/
+          dest=~/Library/Audio/Plug-Ins/Components/$(basename "$comp")
+          codesign --force --deep --sign - "$dest"
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          sleep 3
+          auval -a | grep -i Mrid || true
+          # aufx = kAudioUnitType_Effect, MeMS = PLUGIN_CODE, Mrid = PLUGIN_MANUFACTURER_CODE
+          perl -e 'alarm shift; exec @ARGV' 900 auval -v aufx MeMS Mrid 2>&1 | tee auval.txt || true
+          {
+            echo "### auval (macOS)"
+            echo '```'
+            tail -n 40 auval.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -q "AU VALIDATION SUCCEEDED" auval.txt
+
+      - name: CPU benchmark (informational)
+        if: always()
+        continue-on-error: true
+        run: |
+          exe=$(find build/tests -name cpu_bench -type f -perm -u+x | head -1)
+          "$exe" --per-module 2>&1 | tee cpu_bench.txt
+          { echo "### cpu_bench (macOS)"; echo '```'; cat cpu_bench.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-macos
+          path: |
+            build/ctest-results.xml
+            auval.txt
+            cpu_bench.txt
+            build/Testing/Temporary/LastTest*.log
+
+  linux:
+    name: Linux (regression guard)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install JUCE dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build xvfb libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev \
+            libx11-dev libfreetype-dev libasound2-dev libfontconfig1-dev libgl1-mesa-dev
+
+
+      - name: Download pluginval
+        run: |
+          if [ "$PLUGINVAL_VERSION" = latest ]; then base=https://github.com/Tracktion/pluginval/releases/latest/download; else base=https://github.com/Tracktion/pluginval/releases/download/$PLUGINVAL_VERSION; fi
+          curl -sSL "$base/pluginval_Linux.zip" -o pluginval.zip
+          unzip -q pluginval.zip -d pluginval
+          chmod +x pluginval/pluginval
+          echo "PLUGINVAL_EXE=$PWD/pluginval/pluginval" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPLUGINVAL_EXECUTABLE="$PLUGINVAL_EXE"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: CTest (unit + integration + pluginval)
+        run: xvfb-run -a ctest --test-dir build --output-on-failure -LE perf --output-junit ctest-results.xml
+
+      - name: CPU benchmark (informational)
+        if: always()
+        continue-on-error: true
+        run: |
+          ./build/tests/cpu_bench --per-module 2>&1 | tee cpu_bench.txt || true
+          { echo "### cpu_bench (Linux)"; echo '```'; cat cpu_bench.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-linux
+          path: |
+            build/ctest-results.xml
+            cpu_bench.txt
+            build/Testing/Temporary/LastTest*.log
